@@ -1,7 +1,9 @@
 from einops import rearrange
 import torch
+from models.so3_helpers import tangent_space_proj
+
 torch.set_default_dtype(torch.float64)
-from so3_helpers import tangent_space_proj
+
 
 class PMLP(torch.nn.Module):
     def __init__(self, dim, out_dim=None, w=64, time_varying=False):

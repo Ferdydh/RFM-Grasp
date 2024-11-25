@@ -1,3 +1,9 @@
-.venv
+ckpt
+/data
+*.zip
+__pycache__
+*.pyc
 .vscode
-data
+lightning_logs
+wandb
+checkpoints

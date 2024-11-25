@@ -15,11 +15,9 @@ conda env create -f environment.yml
 Save your new conda env (if you installed something with conda install or pip install)
 
 ```bash
-conda env export > environment.yml
+conda env export --no-builds > environment.yaml
 ```
 
 ## Mesh to sdf
 
-We use mesh-to-sdf that I forked because there was a bug
-
-Remember to set `np.random.seed(42)` to always have the same SDF points.
+We use mesh2sdf
