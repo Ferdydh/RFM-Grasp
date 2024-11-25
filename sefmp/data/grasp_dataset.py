@@ -10,22 +10,18 @@ from typing import List, Tuple, Optional, Union, Dict
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 from collections import defaultdict
+import pickle
+import logging
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class DataSelector:
     """
     Flexible data selection criteria for grasps dataset.
-
-    Examples:
-        # Select by specific grasp ID
-        DataSelector(grasp_id="0.017127096456853612")
-
-        # Select by object ID
-        DataSelector(object_id="abc86fa217ffeeeab3c769e22341ffb4")
-
-        # Select by item name
-        DataSelector(item_name="CerealBox")
     """
 
     grasp_id: Optional[str] = None
@@ -33,37 +29,45 @@ class DataSelector:
     item_name: Optional[str] = None
 
     def matches(self, mesh_path: str, grasp_path: str) -> bool:
-        """Check if paths match the selection criteria."""
-        # Extract information from grasp path
+        """Check if paths match the selection criteria.
+        We don't use the mesh_path here, because we know the mesh exists.
+        """
         grasp_filename = os.path.basename(grasp_path)
         if "_" in grasp_filename:
             item_name, obj_id, grasp_value = grasp_filename.split("_")
-            # Remove .h5 extension and get just the grasp value
             grasp_value = grasp_value.replace(".h5", "")
         else:
             return False
 
-        # Check grasp ID
         if self.grasp_id and self.grasp_id != grasp_value:
             return False
-
-        # Check object ID
         if self.object_id and self.object_id != obj_id:
             return False
-
-        # Check item name
         if self.item_name and self.item_name != item_name:
             return False
-
         return True
+
+
+@dataclass
+class CacheEntry:
+    """Data structure for cached SDF and scale information."""
+
+    sdf: np.ndarray
+    scale_factor: float
+    timestamp: float  # For tracking cache freshness
+    mesh_hash: str  # For validating mesh contents
+
+
+def compute_mesh_hash(mesh_path: str) -> str:
+    """Compute a hash of the mesh file contents."""
+    with open(mesh_path, "rb") as f:
+        return str(hash(f.read()))
 
 
 def process_mesh_to_sdf(mesh_path: str, size: int = 32) -> Tuple[np.ndarray, float]:
     """Process a mesh to SDF with consistent scaling and centering."""
-    # Load mesh
     mesh = trimesh.load(mesh_path)
 
-    # Convert scene to mesh if necessary
     if isinstance(mesh, trimesh.Scene):
         mesh = trimesh.util.concatenate(
             tuple(
@@ -72,57 +76,79 @@ def process_mesh_to_sdf(mesh_path: str, size: int = 32) -> Tuple[np.ndarray, flo
             )
         )
 
-    # Center the vertices
     centroid = mesh.centroid
     vertices = mesh.vertices - centroid
-
-    # Compute scale factor based on max absolute coordinate
     scale_factor = np.max(np.abs(vertices))
-
-    # Scale vertices to [-1, 1]
     vertices = vertices / scale_factor
     faces = mesh.faces
 
-    # Ensure correct dtype for mesh2sdf
     vertices = vertices.astype(np.float32)
     faces = faces.astype(np.uint32)
 
-    # First compute raw SDF to see its range
+    # First compute raw SDF
     raw_sdf = mesh2sdf.core.compute(vertices, faces, size)
     abs_sdf = np.abs(raw_sdf)
-    print(f"SDF range before abs: {raw_sdf.min():.6f} to {raw_sdf.max():.6f}")
-    print(f"SDF range after abs: {abs_sdf.min():.6f} to {abs_sdf.max():.6f}")
 
-    # Use a level value within the range of the absolute SDF
+    # Choose a level value within the range of the absolute SDF
     level = (abs_sdf.min() + abs_sdf.max()) / 2
 
-    # Compute SDF with our chosen level
+    # Compute final SDF with appropriate level
     sdf = mesh2sdf.compute(vertices, faces, size, fix=True, level=level)
 
     return sdf, scale_factor
 
 
-def compute_scale_factor(mesh: Union[trimesh.Trimesh, trimesh.Scene]) -> float:
-    """Compute scale factor to normalize mesh to [-1, 1]."""
-    if isinstance(mesh, trimesh.Scene):
-        extents = np.array([m.extents for m in mesh.geometry.values()]).max(axis=0)
-        return np.max(extents)
-    else:
-        return np.max(mesh.extents)
+class SDFCache:
+    """Handle caching of SDF computations."""
 
+    def __init__(self, cache_dir: str):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_file = self.cache_dir / "sdf_cache.pkl"
+        self.cache = self._load_cache()
 
-def _load_mesh(mesh_path: str) -> Tuple[trimesh.Trimesh, float]:
-    """Load mesh and compute scale factor."""
-    mesh = trimesh.load(mesh_path)
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(
-            tuple(
-                trimesh.Trimesh(vertices=m.vertices, faces=m.faces)
-                for m in mesh.geometry.values()
-            )
+    def _load_cache(self) -> Dict[str, CacheEntry]:
+        """Load cache from disk if it exists."""
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, "rb") as f:
+                    return pickle.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load cache: {e}. Starting with empty cache.")
+                return {}
+        return {}
+
+    def _save_cache(self):
+        """Save cache to disk."""
+        try:
+            with open(self.cache_file, "wb") as f:
+                pickle.dump(self.cache, f)
+        except Exception as e:
+            logger.error(f"Failed to save cache: {e}")
+
+    def get(self, mesh_path: str, size: int) -> Optional[Tuple[np.ndarray, float]]:
+        """Get SDF and scale factor from cache if available and valid."""
+        if mesh_path not in self.cache:
+            return None
+
+        entry = self.cache[mesh_path]
+        current_hash = compute_mesh_hash(mesh_path)
+
+        if current_hash != entry.mesh_hash:
+            logger.info(f"Mesh {mesh_path} has changed, recomputing SDF")
+            return None
+
+        return entry.sdf, entry.scale_factor
+
+    def put(self, mesh_path: str, sdf: np.ndarray, scale_factor: float):
+        """Store SDF and scale factor in cache."""
+        self.cache[mesh_path] = CacheEntry(
+            sdf=sdf,
+            scale_factor=scale_factor,
+            timestamp=os.path.getmtime(mesh_path),
+            mesh_hash=compute_mesh_hash(mesh_path),
         )
-    scale_factor = compute_scale_factor(mesh)
-    return mesh, scale_factor
+        self._save_cache()
 
 
 class GraspDataset(Dataset):
@@ -133,15 +159,8 @@ class GraspDataset(Dataset):
         split: str = "train",
         num_samples: Optional[int] = None,
         sdf_size: int = 32,
+        cache_dir: Optional[str] = None,
     ):
-        """
-        Args:
-            data_root: Root directory containing meshes and grasps folders
-            selectors: Single DataSelector or list of DataSelectors
-            split: One of 'train', 'val', 'test'
-            num_samples: Optional limit on total number of samples
-            sdf_size: Size of the SDF grid (default: 32)
-        """
         self.data_root = data_root
         self.selectors = (
             [selectors] if isinstance(selectors, DataSelector) else selectors
@@ -150,6 +169,9 @@ class GraspDataset(Dataset):
         self.num_samples = num_samples
         self.sdf_size = sdf_size
 
+        # Initialize cache
+        self.cache = SDFCache(cache_dir or os.path.join(data_root, "sdf_cache"))
+
         # Get all meshes and grasps
         mesh_pattern = os.path.join(data_root, "meshes/**/*.obj")
         grasp_pattern = os.path.join(data_root, "grasps/*.h5")
@@ -157,37 +179,53 @@ class GraspDataset(Dataset):
         self.meshes = glob.glob(mesh_pattern, recursive=True)
         self.grasps = glob.glob(grasp_pattern)
 
-        # Group grasps by mesh (object_id)
+        # Group grasps by mesh
         self.mesh_to_grasps = self._create_mesh_grasp_mapping()
 
-        # Process all unique meshes to SDFs and get their scales
+        # Process meshes to SDFs using cache
         self.mesh_to_sdf = {}
+        self.mesh_to_scale = {}
         self._compute_all_sdfs()
 
-        # Load all transforms and scale translations
+        # Load transforms
         self.mesh_to_transforms = {}
         self._load_all_transforms()
 
-        # Create flat index for accessing data
+        # Create index
         self._create_index()
 
     def _compute_all_sdfs(self):
-        """Compute SDFs for all unique meshes."""
-        for mesh_path in self.mesh_to_grasps.keys():
-            sdf, _ = process_mesh_to_sdf(mesh_path, self.sdf_size)
+        """Compute or load from cache SDFs for all unique meshes."""
+        total_meshes = len(self.mesh_to_grasps)
+        for idx, mesh_path in enumerate(self.mesh_to_grasps.keys(), 1):
+            logger.info(
+                f"Processing mesh {idx}/{total_meshes}: {os.path.basename(mesh_path)}"
+            )
+
+            # Try to get from cache
+            cache_result = self.cache.get(mesh_path, self.sdf_size)
+
+            if cache_result is not None:
+                sdf, scale_factor = cache_result
+                logger.info(f"Loaded {os.path.basename(mesh_path)} from cache")
+            else:
+                logger.info(f"Computing SDF for {os.path.basename(mesh_path)}")
+                sdf, scale_factor = process_mesh_to_sdf(mesh_path, self.sdf_size)
+                self.cache.put(mesh_path, sdf, scale_factor)
+
             self.mesh_to_sdf[mesh_path] = sdf
+            self.mesh_to_scale[mesh_path] = scale_factor
 
     def _load_all_transforms(self):
-        """Load transforms and scale translations according to object scale."""
+        """Load and scale transforms for all meshes."""
         for mesh_path, grasp_files in self.mesh_to_grasps.items():
-            # Load mesh and get scale factor
-            mesh, scale_factor = _load_mesh(mesh_path)
+            scale_factor = self.mesh_to_scale[mesh_path]
 
             transforms_list = []
             for grasp_file in grasp_files:
                 with h5py.File(grasp_file, "r") as h5file:
                     transforms = h5file["grasps"]["transforms"][:]
-                    # Scale translations to match normalized space
+                    # Scale translations
                     for transform in transforms:
                         transform[:3, 3] = transform[:3, 3] / scale_factor * 2.0
                     transforms_list.extend(transforms)
@@ -197,7 +235,7 @@ class GraspDataset(Dataset):
             )
 
     def _create_mesh_grasp_mapping(self) -> Dict[str, List[str]]:
-        """Create mapping from mesh paths to their corresponding grasp files."""
+        """Create mapping from mesh paths to corresponding grasp files."""
         mesh_to_grasps = defaultdict(list)
 
         for grasp in self.grasps:
@@ -206,16 +244,12 @@ class GraspDataset(Dataset):
                 continue
 
             item_name, obj_id, _ = grasp_filename.split("_", 2)
-
-            # Find corresponding mesh
             matching_meshes = [m for m in self.meshes if obj_id in m and item_name in m]
 
             if not matching_meshes:
                 continue
 
             mesh = matching_meshes[0]
-
-            # Check if any selector matches
             if any(selector.matches(mesh, grasp) for selector in self.selectors):
                 mesh_to_grasps[mesh].append(grasp)
 
@@ -236,19 +270,11 @@ class GraspDataset(Dataset):
         return len(self.index)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Returns:
-            Tuple of (rotation_matrix, translation_vector, sdf)
-            rotation_matrix: shape (3, 3)
-            translation_vector: shape (3,) - scaled to match normalized object space
-            sdf: shape (size, size, size)
-        """
         mesh_path, transform_idx = self.index[idx]
 
         transform = self.mesh_to_transforms[mesh_path][transform_idx]
         rotation = transform[:3, :3]
-        translation = transform[:3, 3]  # Already scaled in _load_all_transforms
-
+        translation = transform[:3, 3]
         sdf = torch.tensor(self.mesh_to_sdf[mesh_path], dtype=torch.float32)
 
         return rotation, translation, sdf
@@ -262,6 +288,7 @@ class GraspDataModule(pl.LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 4,
         num_samples: Optional[int] = None,
+        cache_dir: Optional[str] = None,
         train_val_test_split: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     ):
         super().__init__()
@@ -270,23 +297,24 @@ class GraspDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.num_samples = num_samples
+        self.cache_dir = cache_dir
         self.train_val_test_split = train_val_test_split
 
     def setup(self, stage: Optional[str] = None):
-        """Set up datasets for each stage."""
         if stage == "fit" or stage is None:
             self.train_dataset = GraspDataset(
                 self.data_root,
                 self.selectors,
                 split="train",
                 num_samples=self.num_samples,
+                cache_dir=self.cache_dir,
             )
-
             self.val_dataset = GraspDataset(
                 self.data_root,
                 self.selectors,
                 split="val",
                 num_samples=self.num_samples,
+                cache_dir=self.cache_dir,
             )
 
         if stage == "test" or stage is None:
@@ -295,6 +323,7 @@ class GraspDataModule(pl.LightningDataModule):
                 self.selectors,
                 split="test",
                 num_samples=self.num_samples,
+                cache_dir=self.cache_dir,
             )
 
     def train_dataloader(self):
@@ -320,41 +349,3 @@ class GraspDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
         )
-
-
-# # Example usage:
-# if __name__ == "__main__":
-#     # Example 1: Select specific grasp
-#     selector1 = DataSelector(grasp_id="0.017127096456853612")
-
-#     # Example 2: Select multiple items
-#     selectors = [
-#         DataSelector(item_name="CerealBox"),
-#         DataSelector(item_name="Mug")
-#     ]
-
-#     # Example 3: Select by object ID
-#     selector3 = DataSelector(object_id="abc86fa217ffeeeab3c769e22341ffb4")
-
-#     # Initialize DataModule with multiple selectors
-#     grasp_data = GraspDataModule(
-#         data_root="data",
-#         selectors=selectors,  # Using list of selectors
-#         batch_size=32,
-#         num_samples=1000  # Optional: limit total samples
-#     )
-
-#     # Set up the data module
-#     grasp_data.setup()
-
-#     # Get data loaders
-#     train_loader = grasp_data.train_dataloader()
-#     val_loader = grasp_data.val_dataloader()
-#     test_loader = grasp_data.test_dataloader()
-
-#     # Example iteration
-#     for rotation, translation, sdf in train_loader:
-#         print(f"Rotation shape: {rotation.shape}")      # (batch_size, 3, 3)
-#         print(f"Translation shape: {translation.shape}") # (batch_size, 3)
-#         print(f"SDF shape: {sdf.shape}")               # (batch_size, size, size, size)
-#         break

@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 def load_config(experiment_name: str) -> Dict[str, Any]:
     """Load configuration from YAML file."""
-    config_path = Path("lhdm") / Path("configs") / f"{experiment_name}.yaml"
+    config_path = Path("sefmp") / Path("configs") / f"{experiment_name}.yaml"
     with open(config_path) as f:
         return yaml.safe_load(f)
 

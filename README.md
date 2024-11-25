@@ -9,7 +9,7 @@ There are 7897 files in the `ShapeNetSem` dataset that follows the same format.
 Setup conda with
 
 ```bash
-conda env create -f environment.yml
+conda env create -f environment.yaml
 ```
 
 Save your new conda env (if you installed something with conda install or pip install)
@@ -18,6 +18,7 @@ Save your new conda env (if you installed something with conda install or pip in
 conda env export --no-builds > environment.yaml
 ```
 
-## Mesh to sdf
+## How to run
 
-We use mesh2sdf
+1. Install the conda environment and turn it on
+2. on root: `python sefmp/main.py --help`

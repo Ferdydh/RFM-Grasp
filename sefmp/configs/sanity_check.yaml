@@ -1,21 +1,19 @@
 data:
-  data_path: "lhdm/data/mnist-inrs"
-  dataset_type: "MNIST"
-  class_label: 2
-  # sample_id: 1096
+  data_path: "data/"
+  object_id: "56f2cfa7d89ef32a5eef6c5d029c7274"
   batch_size: 32 # Increased batch size for better stability
   num_workers: 4
-  sample_limit: 50
+  sample_limit: 1
   split_ratio: [80, 10, 10]
   pin_memory: true
 
 # Autoencoder settings
-model:
-  input_dim: 1185
-  output_dim: 1185
-  hidden_dim: 1185
-  z_dim: 64
-  activation: "relu" # Can be relu, gelu, silu
+# model:
+#   input_dim: 1185
+#   output_dim: 1185
+#   hidden_dim: 1185
+#   z_dim: 64
+#   activation: "relu" # Can be relu, gelu, silu
 
 optimizer:
   name: "adam"
@@ -30,25 +28,25 @@ scheduler:
   eta_min: 1.0e-6
 
 trainer:
-  max_epochs: 2000
+  max_epochs: 100
   precision: 32
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
-  val_check_interval: 1 # Validate every 0.5 epochs
-  log_every_n_steps: 50
+  val_check_interval: 0.5 # Validate every 0.5 epochs
+  log_every_n_steps: 5
 
 logging:
-  project_name: "inr-autoencoder"
+  project_name: "sefmp"
   run_name: null # Will be auto-generated if not specified
-  log_model: false
+  log_model: false # Change to true to save model weights in wandb
   save_dir: "logs"
-  num_samples_to_visualize: 3 # Number of fixed samples to track
-  sample_every_n_epochs: 50 # How often to log sample reconstructions
-  log_every_n_steps: 50
+  num_samples_to_visualize: 4 # Number of fixed samples to track
+  sample_every_n_epochs: 5 # How often to log sample reconstructions
+  log_every_n_steps: 1
 
 checkpoint:
   dirpath: "checkpoints"
-  filename: "autoencoder-{epoch:02d}-{val_loss:.2f}"
+  filename: "sefmp-{epoch:02d}-{val_loss:.2f}"
   monitor: "val/loss"
   mode: "min"
   save_last: true
@@ -56,8 +54,8 @@ checkpoint:
 
 early_stopping:
   monitor: "val/loss" # Metric to monitor
-  min_delta: 1.0e-5 # Minimum change to qualify as an improvement
-  patience: 200 # Number of epochs with no improvement after which training will be stopped
+  min_delta: 1.0e-4 # Minimum change to qualify as an improvement
+  patience: 50 # Number of epochs with no improvement after which training will be stopped
   mode: "min" # "min" for metrics to minimize (like loss), "max" for metrics to maximize
   stopping_threshold: null # Optional: stop training if we reach this value
   divergence_threshold: null # Optional: stop training if we exceed this value

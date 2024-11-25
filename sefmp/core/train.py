@@ -10,10 +10,8 @@ from datetime import datetime
 import atexit
 
 from core.utils import load_config, get_device
-from data.inr_dataset import (
-    DataHandler,
-    create_selector_from_config,
-)
+from data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
+from models.pmlp import PMLP
 
 
 def cleanup_wandb():
@@ -24,8 +22,8 @@ def cleanup_wandb():
         pass
 
 
-def train(experiment: str = "autoencoder_sanity_check"):
-    """Train the autoencoder model with improved logging and visualization."""
+def train(experiment: str = "sanity_check"):
+    """Train the model with lightning."""
     # Register cleanup function
     atexit.register(cleanup_wandb)
 
@@ -37,7 +35,7 @@ def train(experiment: str = "autoencoder_sanity_check"):
         # Setup unique run name if not specified
         if cfg["logging"]["run_name"] is None:
             cfg["logging"]["run_name"] = (
-                f"autoencoder_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                f"sefmp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             )
 
         # Initialize WandB logger with modified settings
@@ -54,15 +52,26 @@ def train(experiment: str = "autoencoder_sanity_check"):
         wandb.save(experiment)  # Save the original config file as an artifact
 
         # Initialize data handler
-        data_handler = DataHandler(
-            hparams={**cfg["data"], "device": device},
-            data_folder=cfg["data"]["data_path"],
-            selectors=create_selector_from_config(cfg),
+        selector = DataSelector(
+            grasp_id=cfg["data"].get("grasp_id"),
+            object_id=cfg["data"].get("object_id"),
+            item_name=cfg["data"].get("item_name"),
         )
 
-        # Get dataloaders
-        train_loader = data_handler.train_dataloader()
-        val_loader = data_handler.val_dataloader()
+        # Initialize DataModule with multiple selectors
+        grasp_data = GraspDataModule(
+            data_root=cfg["data"]["data_path"],
+            selectors=selector,  # Using list of selectors
+            batch_size=32,
+            num_samples=1,  # Optional: limit total samples
+        )
+
+        # Set up the data module
+        grasp_data.setup()
+
+        # Get data loaders
+        train_loader = grasp_data.train_dataloader()
+        val_loader = grasp_data.val_dataloader()
 
         # Setup callbacks
         callbacks = []
@@ -117,12 +126,13 @@ def train(experiment: str = "autoencoder_sanity_check"):
         wandb.require("service")
 
         # Initialize model
-        # model = Autoencoder(cfg)
+        model = PMLP(dim=9)
+        # model = PMLP(cfg)
 
         # Train model
-        # trainer.fit(
-        #     model=model, train_dataloaders=train_loader, val_dataloaders=val_loader
-        # )
+        trainer.fit(
+            model=model, train_dataloaders=train_loader, val_dataloaders=val_loader
+        )
 
         print("\nTraining completed successfully!")
 
