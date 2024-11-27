@@ -7,7 +7,7 @@ import mesh2sdf
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Union, Dict
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader,Sampler,RandomSampler
 import pytorch_lightning as pl
 from collections import defaultdict
 import pickle
@@ -150,6 +150,21 @@ class SDFCache:
         )
         self._save_cache()
 
+class RepeatSampler(Sampler):
+    def __init__(self, data_source, batch_size):
+        self.data_source = data_source
+        self.batch_size = batch_size
+        self.num_repetitions = (batch_size + len(data_source) - 1) // len(data_source)
+
+    def __iter__(self):
+        # Repeat the indices to fill the batch
+        indices = list(range(len(self.data_source))) * self.num_repetitions
+        return iter(indices[:self.batch_size])
+
+    def __len__(self):
+        return self.batch_size
+    
+
 
 class GraspDataset(Dataset):
     def __init__(
@@ -234,10 +249,10 @@ class GraspDataset(Dataset):
                     transforms_list.extend(transforms)
 
             self.mesh_to_transforms[mesh_path] = torch.tensor(
-                transforms_list, dtype=torch.float64
+                transforms_list, dtype=torch.float32
             )
 
-    def _create_mesh_grasp_mapping(self,max_grasps: Union[int, str] = 'all') -> Dict[str, List[str]]:
+    def _create_mesh_grasp_mapping(self) -> Dict[str, List[str]]:
         """Create mapping from mesh paths to corresponding grasp files."""
         mesh_to_grasps = defaultdict(list)
 
@@ -288,6 +303,7 @@ class GraspDataModule(pl.LightningDataModule):
         self,
         data_root: str,
         selectors: Union[DataSelector, List[DataSelector]],
+        sampler_opt: Optional[str] = None,
         batch_size: int = 32,
         num_workers: int = 4,
         num_samples: Optional[int] = None,
@@ -297,6 +313,7 @@ class GraspDataModule(pl.LightningDataModule):
         super().__init__()
         self.data_root = data_root
         self.selectors = selectors
+        self.sampler_opt = sampler_opt # to create batches bigger than the dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.num_samples = num_samples
@@ -319,6 +336,8 @@ class GraspDataModule(pl.LightningDataModule):
                 num_samples=self.num_samples,
                 cache_dir=self.cache_dir,
             )
+        num_samples = self.batch_size if self.sampler_opt == 'repeat' else len(self.train_dataset)
+        self.sampler = RandomSampler(data_source = self.train_dataset,num_samples = num_samples)
 
         if stage == "test" or stage is None:
             self.test_dataset = GraspDataset(
@@ -330,11 +349,13 @@ class GraspDataModule(pl.LightningDataModule):
             )
 
     def train_dataloader(self):
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            shuffle=True,
+            #shuffle=True,
             num_workers=self.num_workers,
+            sampler = self.sampler,
         )
 
     def val_dataloader(self):
