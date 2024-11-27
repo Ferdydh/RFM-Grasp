@@ -225,16 +225,19 @@ class GraspDataset(Dataset):
             for grasp_file in grasp_files:
                 with h5py.File(grasp_file, "r") as h5file:
                     transforms = h5file["grasps"]["transforms"][:]
+                    grasp_sucess = h5file['grasps']['qualities']['flex']['object_in_gripper'][:]
+                    mask = grasp_sucess == 1
+                    transforms = transforms[mask]
                     # Scale translations
                     for transform in transforms:
                         transform[:3, 3] = transform[:3, 3] / scale_factor * 2.0
                     transforms_list.extend(transforms)
 
             self.mesh_to_transforms[mesh_path] = torch.tensor(
-                transforms_list, dtype=torch.float32
+                transforms_list, dtype=torch.float64
             )
 
-    def _create_mesh_grasp_mapping(self) -> Dict[str, List[str]]:
+    def _create_mesh_grasp_mapping(self,max_grasps: Union[int, str] = 'all') -> Dict[str, List[str]]:
         """Create mapping from mesh paths to corresponding grasp files."""
         mesh_to_grasps = defaultdict(list)
 
@@ -275,7 +278,7 @@ class GraspDataset(Dataset):
         transform = self.mesh_to_transforms[mesh_path][transform_idx]
         rotation = transform[:3, :3]
         translation = transform[:3, 3]
-        sdf = torch.tensor(self.mesh_to_sdf[mesh_path], dtype=torch.float32)
+        sdf = torch.tensor(self.mesh_to_sdf[mesh_path], dtype=torch.float64)
 
         return rotation, translation, sdf
 

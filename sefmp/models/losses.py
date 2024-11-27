@@ -1,5 +1,5 @@
 import torch
-from models.so3_helpers import norm_SO3
+from .so3_helpers import norm_SO3
 
 
 def loss_fn(v, u, x):
