@@ -6,8 +6,11 @@ from jaxtyping import Float
 from torch import Tensor
 from typeguard import typechecked
 
-from .r3fm import R3FM
-from .so3fm import SO3FM
+# from .r3fm import R3FM
+# from .so3fm import SO3FM
+from .f_R3FM import R3FM
+from .f_SO3FM import SO3FM
+
 from .wasserstein import wasserstein_distance
 
 
@@ -23,11 +26,10 @@ class SE3FMModule(pl.LightningModule):
         self.so3fm = SO3FM()
         self.r3fm = R3FM()
     
-    @typechecked
     def compute_loss(
         self,
-        so3_inputs: Float[Tensor, "batch feature_dim"],
-        r3_inputs: Float[Tensor, "batch feature_dim"],
+        so3_inputs,
+        r3_inputs,
         prefix: str = "train",
     ) -> Tuple[Tensor, dict[str, Tensor]]:
 
@@ -51,7 +53,8 @@ class SE3FMModule(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         so3_input, r3_input, sdf_input = batch
         r3_generated = self.r3fm.generate(r3_input)
-        so3_generated = self.so3fm.generate(so3_input)
+        so3_generated = self.so3fm.generate(so3_input).unsqueeze(0)
+        print(so3_generated.shape,r3_generated.shape)
         r3_wasserstein = wasserstein_distance(
             r3_generated, r3_input, space="r3", method="exact", power=2
         )

@@ -1,8 +1,10 @@
+
 import torch
 from einops import rearrange
 from geomstats._backend import _backend_config as _config
 from geomstats.geometry.special_orthogonal import SpecialOrthogonal
 from scipy.spatial.transform import Rotation
+import torch.nn as nn
 
 from .pmlp import PMLP
 from .so3_condflowmatcher import SO3ConditionalFlowMatcher
@@ -13,8 +15,9 @@ _config.DEFAULT_DTYPE = torch.cuda.FloatTensor
 # TODO: Implement conditioning
 
 
-class SO3FM:
-    def __init__(self):
+class SO3FM(PMLP):
+    def __init__(self, dim, out_dim=None, w=64, time_varying=False):
+
         self.so3_group = SpecialOrthogonal(n=3, point_type="matrix")
         self.so3_cfm = SO3ConditionalFlowMatcher(manifold=self.so3_group)
         self.model = PMLP(9, time_varying=True)

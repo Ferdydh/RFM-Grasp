@@ -11,8 +11,8 @@ from datetime import datetime
 import atexit
 
 from .utils import load_config, get_device
-from ..data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
-from ..models.se3fm_pl import SE3FMModule
+from data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
+from models.se3fm_pl import SE3FMModule
 
 
 def cleanup_wandb():
@@ -116,15 +116,15 @@ def train(experiment: str = "sanity_check"):
             logger=wandb_logger,
             callbacks=callbacks,
             max_epochs=cfg["trainer"]["max_epochs"],
-            accelerator="auto",
-            devices="auto",
-            precision=cfg["trainer"]["precision"],
+            accelerator="cpu",  # Change this to explicitly use CPU
+            devices=1,  # Use single CPU device
+            precision=64,  # Force 32-bit precision
             gradient_clip_val=cfg["trainer"]["gradient_clip_val"],
             accumulate_grad_batches=cfg["trainer"]["accumulate_grad_batches"],
             val_check_interval=cfg["trainer"]["val_check_interval"],
             log_every_n_steps=cfg["trainer"]["log_every_n_steps"],
         )
-
+        
         # Add this right before trainer.fit()
         wandb.require("service")
 

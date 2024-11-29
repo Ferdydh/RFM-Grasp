@@ -28,7 +28,7 @@ scheduler:
   eta_min: 1.0e-6
 
 trainer:
-  max_epochs: 100
+  max_epochs: 1
   precision: 32
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
