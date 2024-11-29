@@ -5,13 +5,14 @@ from pytorch_lightning.callbacks import (
     LearningRateMonitor,
     EarlyStopping,
 )
+
 import wandb
 from datetime import datetime
 import atexit
 
-from core.utils import load_config, get_device
-from data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
-from models.pmlp import PMLP
+from .utils import load_config, get_device
+from ..data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
+from ..models.se3fm_pl import SE3FMModule
 
 
 def cleanup_wandb():
@@ -30,6 +31,8 @@ def train(experiment: str = "sanity_check"):
     try:
         # Load configuration
         cfg = load_config(experiment)
+
+        #TODO: Utilize device
         device = get_device()
 
         # Setup unique run name if not specified
@@ -126,7 +129,7 @@ def train(experiment: str = "sanity_check"):
         wandb.require("service")
 
         # Initialize model
-        model = PMLP(dim=9)
+        model = SE3FMModule(cfg)
         # model = PMLP(cfg)
 
         # Train model
@@ -144,3 +147,6 @@ def train(experiment: str = "sanity_check"):
         # Ensure wandb is properly closed
         cleanup_wandb()
         print("\nWandB run closed. Exiting...")
+
+if __name__ == "__main__":
+    train()

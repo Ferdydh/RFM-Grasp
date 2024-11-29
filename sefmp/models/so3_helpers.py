@@ -1,21 +1,26 @@
 import torch
 
+
 def exp(A):
     return torch.linalg.matrix_exp(A)
+
 
 def expmap(R0, tangent):
     skew_sym = torch.einsum("...ij,...ik->...jk", R0, tangent)
     return torch.einsum("...ij,...jk->...ik", R0, exp(skew_sym))
 
+
 # Parallel Transport a matrix at v at point R to the Tangent Space at identity
 def pt_to_identity(R, v):
     return torch.transpose(R, dim0=-2, dim1=-1) @ v
+
 
 def norm_SO3(R, T_R):
     # calulate the norm squared of matrix T_R in the tangent space of R
     r = pt_to_identity(R, T_R)  # matrix r is in so(3)
     norm = -torch.diagonal(r @ r, dim1=-2, dim2=-1).sum(dim=-1) / 2  # -trace(rTr)/2
     return norm
+
 
 def tangent_space_proj(R, M):
     """
@@ -35,3 +40,10 @@ def tangent_space_proj(R, M):
     T = R @ skew_symmetric_part
 
     return T
+
+
+def loss_so3(v, u, x):
+    res = v - u
+    norm = norm_SO3(x, res)  # norm-squared on SO(3)
+    loss = torch.mean(norm, dim=-1)
+    return loss
