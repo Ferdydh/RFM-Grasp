@@ -15,6 +15,9 @@ from .wasserstein import wasserstein_distance
 class SE3FMModule(pl.LightningModule):
     def __init__(self, config: dict):
         super().__init__()
+        #There are some loss issues related to quaternions
+        # that we need to solve for float32
+        
         #torch.set_float32_matmul_precision("medium")
         #torch.set_default_dtype(torch.float32)
         self.config = config

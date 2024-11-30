@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from geomstats.geometry.special_orthogonal import SpecialOrthogonal
-from .so3_condflowmatcher import SO3ConditionalFlowMatcher#,rotmat_to_rotvec
+from .so3_condflowmatcher import SO3ConditionalFlowMatcher
 from scipy.spatial.transform import Rotation
 from torch import Tensor
 
@@ -85,7 +85,7 @@ class SO3FM(nn.Module):
             Rotation.random(x1.size(0)).as_matrix()
         ).to(x1.device)
         #TODO: check the difference between _simple and the OT version later
-        # so3 group is a matrix manifold and in the flowmatche we have
+        # so3 group is a matrix manifold and in the flowmatcher we have
         # additional vector manifold for the tangent space
         t, xt, ut = self.so3_cfm.sample_location_and_conditional_flow_simple(x0, x1)
         #t, xt, ut = self._sample_location_and_flow(x0, x1)
@@ -110,6 +110,9 @@ class SO3FM(nn.Module):
         )
         return rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
 
+
+    
+    # We are not using this function, yet we can use it later with small modifications
     # def _sample_location_and_flow(self, x0: Tensor, x1: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     #     """Sample location and compute conditional flow."""
     #     t = torch.rand(x0.shape[0]).type_as(x0).to(x0.device)
