@@ -6,10 +6,8 @@ from jaxtyping import Float
 from torch import Tensor
 from typeguard import typechecked
 
-# from .r3fm import R3FM
-# from .so3fm import SO3FM
-from .f_R3FM import R3FM
-from .f_SO3FM import SO3FM
+from .r3fm import R3FM
+from .so3fm import SO3FM
 
 from .wasserstein import wasserstein_distance
 
@@ -17,8 +15,8 @@ from .wasserstein import wasserstein_distance
 class SE3FMModule(pl.LightningModule):
     def __init__(self, config: dict):
         super().__init__()
-        torch.set_float32_matmul_precision("medium")
-        torch.set_default_dtype(torch.float32)
+        #torch.set_float32_matmul_precision("medium")
+        #torch.set_default_dtype(torch.float32)
         self.config = config
         self.optimizer_config = config["optimizer"]
         self.scheduler_config = config["scheduler"]
@@ -48,15 +46,26 @@ class SE3FMModule(pl.LightningModule):
         so3_input, r3_input, sdf_input = batch
         # TODO: Implement log dict here
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
+        if batch_idx % 100 == 0:    
+            self.log("train/loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         so3_input, r3_input, sdf_input = batch
+        #These generate function later only take sdf input
+        # Loss here is does care about generation, 
+        # it is not about time t velocity estimation
+
         r3_generated = self.r3fm.generate(r3_input)
-        print(r3_input,r3_generated)
+
         so3_generated = self.so3fm.generate(so3_input).unsqueeze(0)
         
-        print(so3_input,so3_generated)
+        print("R3 Ground Truth:", r3_input, "\nR3 Generated:", r3_generated)
+        print("SO3 Input:", so3_input, "\nSO3 Generated:", so3_generated)
+
+        
+        # Calculate Wasserstein distance the calculation 
+        # at the top won't be used if we use this
 
         # r3_wasserstein = wasserstein_distance(
         #     r3_generated, r3_input, space="r3", method="exact", power=2
@@ -65,13 +74,14 @@ class SE3FMModule(pl.LightningModule):
         #     so3_generated, so3_input, space="so3", method="exact", power=2
         # )
         
-        #         # Calculate total validation loss
+        ## Calculate total validation loss
         # val_loss = r3_wasserstein + so3_wasserstein
         
-        # # Log metrics with val/ prefix
+        ## Log metrics with val/ prefix
         # self.log('val/loss', val_loss, prog_bar=True)
         # self.log('val/r3_wasserstein', r3_wasserstein)
         # self.log('val/so3_wasserstein', so3_wasserstein)
+        
         val_loss = torch.mean(torch.abs(r3_generated - r3_input)) + torch.mean(torch.abs(so3_generated - so3_input))
 
         self.log('val/loss', val_loss, prog_bar=True)

@@ -7,7 +7,6 @@ from geomstats.geometry.special_orthogonal import SpecialOrthogonal
 def _normalize_quaternion(quat):
     return quat / torch.norm(quat, dim=-1, keepdim=True)
 
-
 def rotmat_to_quat(matrix):
     num_rots = matrix.shape[0]
     matrix_diag = torch.diagonal(matrix, dim1=-2, dim2=-1)
@@ -83,7 +82,7 @@ class SO3ConditionalFlowMatcher:
 
     def sample_xt(self, x0, x1, t):
         # sample along the geodesic from x0 to x1
-        log_x1, rot_x0 = self.vec_log_map(x0.double(), x1.double())
+        log_x1, rot_x0 = self.vec_log_map(x0, x1)
         # group exponential at x0
         xt = self.vec_manifold.exp_not_from_identity(t.reshape(-1, 1) * log_x1, rot_x0)
         xt = self.vec_manifold.matrix_from_rotation_vector(xt)

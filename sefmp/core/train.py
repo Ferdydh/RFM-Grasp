@@ -9,16 +9,11 @@ from pytorch_lightning.callbacks import (
 import wandb
 from datetime import datetime
 import atexit
-import os
-# import os
 
-os.environ["GEOMSTATS_BACKEND"] = "pytorch"
 from .utils import load_config, get_device
 from data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
-from models.se3fm_pl import SE3FMModule
+from models.se3lightning import SE3FMModule
 
-import warnings
-warnings.filterwarnings("ignore")
 
 
 def cleanup_wandb():
@@ -129,7 +124,7 @@ def train(experiment: str = "sanity_check"):
             precision=cfg["trainer"]["precision"],  # Force 32-bit precision
             gradient_clip_val=cfg["trainer"]["gradient_clip_val"],
             accumulate_grad_batches=cfg["trainer"]["accumulate_grad_batches"],
-            #val_check_interval=cfg["trainer"]["val_check_interval"],
+            #val_check_interval=cfg["trainer"]["val_check_interval"], we check every n epochs currently
             check_val_every_n_epoch=cfg["trainer"]["check_val_every_n_epoch"],
             log_every_n_steps=cfg["trainer"]["log_every_n_steps"],
         )
@@ -139,7 +134,6 @@ def train(experiment: str = "sanity_check"):
 
         # Initialize model
         model = SE3FMModule(cfg)
-        # model = PMLP(cfg)
 
         # Train model
         trainer.fit(

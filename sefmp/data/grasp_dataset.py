@@ -151,6 +151,8 @@ class SDFCache:
         self._save_cache()
 
 class RepeatSampler(Sampler):
+    """Required for creating batches larger than the dataset."""
+
     def __init__(self, data_source, batch_size):
         self.data_source = data_source
         self.batch_size = batch_size
@@ -293,8 +295,7 @@ class GraspDataset(Dataset):
         transform = self.mesh_to_transforms[mesh_path][transform_idx]
         rotation = transform[:3, :3]
         translation = transform[:3, 3]
-        sdf = torch.tensor(self.mesh_to_sdf[mesh_path], dtype=torch.float64)
-
+        sdf = torch.tensor(self.mesh_to_sdf[mesh_path])
         return rotation, translation, sdf
 
 
@@ -315,7 +316,7 @@ class GraspDataModule(pl.LightningDataModule):
         self.selectors = selectors
         self.sampler_opt = sampler_opt # to create batches bigger than the dataset
         self.batch_size = batch_size
-        self.num_workers = num_workers
+        self.num_workers = num_workers # currently it is 0 because new workers are created after each epoch
         self.num_samples = num_samples
         self.cache_dir = cache_dir
         self.train_val_test_split = train_val_test_split
