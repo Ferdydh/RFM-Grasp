@@ -155,7 +155,6 @@ class RepeatSampler(Sampler):
         self.data_source = data_source
         self.batch_size = batch_size
         self.num_repetitions = (batch_size + len(data_source) - 1) // len(data_source)
-
     def __iter__(self):
         # Repeat the indices to fill the batch
         indices = list(range(len(self.data_source))) * self.num_repetitions
@@ -245,6 +244,7 @@ class GraspDataset(Dataset):
                     transforms = transforms[mask]
                     # Scale translations
                     for transform in transforms:
+                        #TODO: Correct this
                         transform[:3, 3] = transform[:3, 3] / scale_factor * 2.0
                     transforms_list.extend(transforms)
 
@@ -361,7 +361,7 @@ class GraspDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
+            batch_size=1,#self.batch_size, for now just to see if grasps improve
             shuffle=False,
             num_workers=self.num_workers,
         )

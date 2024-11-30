@@ -9,10 +9,16 @@ from pytorch_lightning.callbacks import (
 import wandb
 from datetime import datetime
 import atexit
+import os
+# import os
 
+os.environ["GEOMSTATS_BACKEND"] = "pytorch"
 from .utils import load_config, get_device
 from data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
 from models.se3fm_pl import SE3FMModule
+
+import warnings
+warnings.filterwarnings("ignore")
 
 
 def cleanup_wandb():
@@ -65,8 +71,10 @@ def train(experiment: str = "sanity_check"):
         grasp_data = GraspDataModule(
             data_root=cfg["data"]["data_path"],
             selectors=selector,  # Using list of selectors
-            batch_size=32,
+            sampler_opt=cfg["data"]["sampler_opt"],
+            batch_size=cfg["data"]["batch_size"],
             num_samples=1,  # Optional: limit total samples
+            num_workers=cfg["data"]["num_workers"],
         )
 
         # Set up the data module
@@ -118,10 +126,11 @@ def train(experiment: str = "sanity_check"):
             max_epochs=cfg["trainer"]["max_epochs"],
             accelerator="cpu",  # Change this to explicitly use CPU
             devices=1,  # Use single CPU device
-            precision=64,  # Force 32-bit precision
+            precision=cfg["trainer"]["precision"],  # Force 32-bit precision
             gradient_clip_val=cfg["trainer"]["gradient_clip_val"],
             accumulate_grad_batches=cfg["trainer"]["accumulate_grad_batches"],
-            val_check_interval=cfg["trainer"]["val_check_interval"],
+            #val_check_interval=cfg["trainer"]["val_check_interval"],
+            check_val_every_n_epoch=cfg["trainer"]["check_val_every_n_epoch"],
             log_every_n_steps=cfg["trainer"]["log_every_n_steps"],
         )
         

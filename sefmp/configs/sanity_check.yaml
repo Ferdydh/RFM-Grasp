@@ -1,10 +1,11 @@
 data:
   data_path: "data/"
   object_id: "56f2cfa7d89ef32a5eef6c5d029c7274"
-  batch_size: 32 # Increased batch size for better stability
-  num_workers: 4
+  batch_size: 128 # Increased batch size for better stability
+  num_workers: 0
   sample_limit: 1
   split_ratio: [80, 10, 10]
+  sampler_opt: "repeat"
   pin_memory: true
 
 # Autoencoder settings
@@ -28,11 +29,12 @@ scheduler:
   eta_min: 1.0e-6
 
 trainer:
-  max_epochs: 1
-  precision: 32
+  max_epochs: 10000
+  precision: 64
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
-  val_check_interval: 0.5 # Validate every 0.5 epochs
+  #val_check_interval: 100 # Validate every 0.5 epochs
+  check_val_every_n_epoch: 400
   log_every_n_steps: 5
 
 logging:

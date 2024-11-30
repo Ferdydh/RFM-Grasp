@@ -17,8 +17,9 @@ from .wasserstein import wasserstein_distance
 class SE3FMModule(pl.LightningModule):
     def __init__(self, config: dict):
         super().__init__()
+        torch.set_float32_matmul_precision("medium")
+        torch.set_default_dtype(torch.float32)
         self.config = config
-        print(config['optimizer'])
         self.optimizer_config = config["optimizer"]
         self.scheduler_config = config["scheduler"]
 
@@ -45,7 +46,6 @@ class SE3FMModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):  # We will add conditioning here
         so3_input, r3_input, sdf_input = batch
-
         # TODO: Implement log dict here
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
         return loss
@@ -53,15 +53,30 @@ class SE3FMModule(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         so3_input, r3_input, sdf_input = batch
         r3_generated = self.r3fm.generate(r3_input)
+        print(r3_input,r3_generated)
         so3_generated = self.so3fm.generate(so3_input).unsqueeze(0)
-        print(so3_generated.shape,r3_generated.shape)
-        r3_wasserstein = wasserstein_distance(
-            r3_generated, r3_input, space="r3", method="exact", power=2
-        )
-        so3_wasserstein = wasserstein_distance(
-            so3_generated, so3_input, space="so3", method="exact", power=2
-        )
-        return r3_wasserstein, so3_wasserstein
+        
+        print(so3_input,so3_generated)
+
+        # r3_wasserstein = wasserstein_distance(
+        #     r3_generated, r3_input, space="r3", method="exact", power=2
+        # )
+        # so3_wasserstein = wasserstein_distance(
+        #     so3_generated, so3_input, space="so3", method="exact", power=2
+        # )
+        
+        #         # Calculate total validation loss
+        # val_loss = r3_wasserstein + so3_wasserstein
+        
+        # # Log metrics with val/ prefix
+        # self.log('val/loss', val_loss, prog_bar=True)
+        # self.log('val/r3_wasserstein', r3_wasserstein)
+        # self.log('val/so3_wasserstein', so3_wasserstein)
+        val_loss = torch.mean(torch.abs(r3_generated - r3_input)) + torch.mean(torch.abs(so3_generated - so3_input))
+
+        self.log('val/loss', val_loss, prog_bar=True)
+
+        return val_loss
 
     def configure_optimizers(self):
         # Configure optimizer
