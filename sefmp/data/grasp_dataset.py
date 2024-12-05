@@ -21,7 +21,7 @@ class CacheEntry:
     """Data structure for cached SDF and scale information."""
 
     sdf: np.ndarray
-    scale_factor: float
+    normalization_scale: float
     timestamp: float
 
 
@@ -45,8 +45,8 @@ def process_mesh_to_sdf(
     """Process a mesh to SDF with consistent scaling and centering."""
     centroid = mesh.centroid
     vertices = mesh.vertices - centroid
-    scale_factor = np.max(np.abs(vertices))
-    vertices = vertices / scale_factor
+    normalization_scale = np.max(np.abs(vertices))
+    vertices = vertices / normalization_scale
     faces = mesh.faces
 
     vertices = vertices.astype(np.float32)
@@ -62,7 +62,7 @@ def process_mesh_to_sdf(
     # Compute final SDF with appropriate level
     sdf = mesh2sdf.compute(vertices, faces, size, fix=True, level=level)
 
-    return sdf, scale_factor
+    return sdf, normalization_scale
 
 
 class SDFCache:
@@ -96,12 +96,12 @@ class SDFCache:
             return None
 
         entry = self.cache[mesh_path]
-        return entry.sdf, entry.scale_factor
+        return entry.sdf, entry.normalization_scale
 
-    def put(self, mesh_path: str, sdf: np.ndarray, scale_factor: float):
+    def put(self, mesh_path: str, sdf: np.ndarray, normalization_scale: float):
         self.cache[mesh_path] = CacheEntry(
             sdf=sdf,
-            scale_factor=scale_factor,
+            normalization_scale=normalization_scale,
             timestamp=os.path.getmtime(mesh_path),
         )
         self._save_cache()
@@ -116,19 +116,21 @@ class GraspDataset(Dataset):
         num_samples: Optional[int] = None,
         sdf_size: int = 32,
         cache_dir: Optional[str] = None,
+        use_cache: bool = True,
     ):
         self.data_root = data_root
         self.grasp_files = grasp_files
         self.split = split
         self.num_samples = num_samples
         self.sdf_size = sdf_size
+        self.use_cache = use_cache
 
         # Initialize cache
         self.cache = SDFCache(cache_dir or os.path.join(data_root, "sdf_cache"))
 
         # Process meshes and grasps
         self.mesh_to_sdf = {}
-        self.mesh_to_scale = {}
+        self.mesh_to_normalization_scale = {}
         self.processed_data = []  # List to store all processed grasps
 
         # Process all grasp files and their corresponding meshes
@@ -151,7 +153,7 @@ class GraspDataset(Dataset):
             # Load grasp file and get mesh information
             with h5py.File(grasp_file, "r") as h5file:
                 mesh_fname = h5file["object/file"][()].decode("utf-8")
-                mesh_scale = h5file["object/scale"][()]
+                dataset_mesh_scale = h5file["object/scale"][()]
 
                 # Load transforms and filter successful grasps
                 transforms = h5file["grasps"]["transforms"][:]
@@ -167,47 +169,60 @@ class GraspDataset(Dataset):
             if mesh_path not in self.mesh_to_sdf:
                 cache_result = self.cache.get(mesh_path)
 
-                if cache_result is not None:
-                    sdf, scale_factor = cache_result
+                if self.use_cache and cache_result is not None:
+                    sdf, normalization_scale = cache_result
                     logger.info(f"Loaded {os.path.basename(mesh_path)} from cache")
                 else:
                     mesh = trimesh.load(mesh_path)
-                    mesh = mesh.apply_scale(mesh_scale)
+                    mesh = mesh.apply_scale(dataset_mesh_scale)
                     mesh = enforce_trimesh(mesh)
 
                     logger.info(f"Computing SDF for {os.path.basename(mesh_path)}")
-                    sdf, scale_factor = process_mesh_to_sdf(mesh, self.sdf_size)
-                    self.cache.put(mesh_path, sdf, scale_factor)
+                    sdf, normalization_scale = process_mesh_to_sdf(mesh, self.sdf_size)
+                    self.cache.put(mesh_path, sdf, normalization_scale)
 
                 self.mesh_to_sdf[mesh_path] = sdf
-                self.mesh_to_scale[mesh_path] = scale_factor
+                self.mesh_to_normalization_scale[mesh_path] = normalization_scale
 
             # Scale and store transforms
-            scale_factor = self.mesh_to_scale[mesh_path]
+            normalization_scale = self.mesh_to_normalization_scale[mesh_path]
             for transform in transforms:
-                scaled_transform = transform.copy()
-                scaled_transform[:3, 3] = scaled_transform[:3, 3] / scale_factor
+                scaled_transform = transform.copy() / normalization_scale
                 self.processed_data.append(
                     {
                         "mesh_path": mesh_path,
                         "transform": torch.tensor(
                             scaled_transform, dtype=torch.float32
                         ),
+                        "dataset_mesh_scale": float(dataset_mesh_scale),
+                        "normalization_scale": float(normalization_scale),
                     }
                 )
 
     def __len__(self):
         return len(self.processed_data)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(
+        self, idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, str, float, float]:
         data_point = self.processed_data[idx]
         mesh_path = data_point["mesh_path"]
         transform = data_point["transform"]
+        dataset_mesh_scale = data_point["dataset_mesh_scale"]
+        normalization_scale = data_point["normalization_scale"]
 
         rotation = transform[:3, :3]
         translation = transform[:3, 3]
         sdf = torch.tensor(self.mesh_to_sdf[mesh_path])
-        return rotation, translation, sdf
+
+        return (
+            rotation,
+            translation,
+            sdf,
+            mesh_path,
+            dataset_mesh_scale,
+            normalization_scale,
+        )
 
 
 class GraspDataModule(pl.LightningDataModule):

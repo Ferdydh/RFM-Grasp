@@ -4,7 +4,7 @@ data:
     ["Xbox360_14e5dba73b283dc7fe0939859a0b15ea_0.0005312646125977.h5"]
   batch_size: 128 # Increased batch size for better stability
   num_workers: 0
-  sample_limit: 1
+  num_samples: 1
   split_ratio: [80, 10, 10]
   sampler_opt: "repeat"
   pin_memory: true
