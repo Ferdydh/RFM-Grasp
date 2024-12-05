@@ -382,27 +382,27 @@ class Scene(object):
 #     return obj_mesh
 
 
-def load_grasps(filename):
-    """Load transformations and qualities of grasps from a JSON file from the dataset.
+# def load_grasps(filename):
+#     """Load transformations and qualities of grasps from a JSON file from the dataset.
 
-    Args:
-        filename (str): HDF5 or JSON file name.
+#     Args:
+#         filename (str): HDF5 or JSON file name.
 
-    Returns:
-        np.ndarray: Homogenous matrices describing the grasp poses. 2000 x 4 x 4.
-        np.ndarray: List of binary values indicating grasp success in simulation.
-    """
-    if filename.endswith(".json"):
-        data = json.load(open(filename, "r"))
-        T = np.array(data["transforms"])
-        success = np.array(data["quality_flex_object_in_gripper"])
-    elif filename.endswith(".h5"):
-        data = h5py.File(filename, "r")
-        T = np.array(data["grasps/transforms"])
-        success = np.array(data["grasps/qualities/flex/object_in_gripper"])
-    else:
-        raise RuntimeError("Unknown file ending:", filename)
-    return T, success
+#     Returns:
+#         np.ndarray: Homogenous matrices describing the grasp poses. 2000 x 4 x 4.
+#         np.ndarray: List of binary values indicating grasp success in simulation.
+#     """
+#     if filename.endswith(".json"):
+#         data = json.load(open(filename, "r"))
+#         T = np.array(data["transforms"])
+#         success = np.array(data["quality_flex_object_in_gripper"])
+#     elif filename.endswith(".h5"):
+#         data = h5py.File(filename, "r")
+#         T = np.array(data["grasps/transforms"])
+#         success = np.array(data["grasps/qualities/flex/object_in_gripper"])
+#     else:
+#         raise RuntimeError("Unknown file ending:", filename)
+#     return T, success
 
 
 def create_gripper_marker(

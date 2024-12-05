@@ -44,7 +44,15 @@ class SE3FMModule(pl.LightningModule):
         return so3_output, r3_output
 
     def training_step(self, batch, batch_idx):  # We will add conditioning here
-        so3_input, r3_input, sdf_input, mesh_path, mesh_scale = batch
+        (
+            so3_input,
+            r3_input,
+            sdf_input,
+            mesh_path,
+            dataset_mesh_scale,
+            normalization_scale,
+        ) = batch
+
         # TODO: Implement log dict here
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
         if batch_idx % 100 == 0:
@@ -52,7 +60,15 @@ class SE3FMModule(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        so3_input, r3_input, sdf_input, mesh_path, mesh_scale = batch
+        (
+            so3_input,
+            r3_input,
+            sdf_input,
+            mesh_path,
+            dataset_mesh_scale,
+            normalization_scale,
+        ) = batch
+
         # These generate function later only take sdf input
         # Loss here is does care about generation,
         # it is not about time t velocity estimation
