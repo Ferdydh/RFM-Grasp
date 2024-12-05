@@ -1,6 +1,7 @@
 data:
   data_path: "data/"
-  object_id: "56f2cfa7d89ef32a5eef6c5d029c7274"
+  grasp_files:
+    ["Xbox360_14e5dba73b283dc7fe0939859a0b15ea_0.0005312646125977.h5"]
   batch_size: 128 # Increased batch size for better stability
   num_workers: 0
   sample_limit: 1

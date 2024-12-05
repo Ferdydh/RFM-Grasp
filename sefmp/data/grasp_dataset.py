@@ -1,15 +1,13 @@
 import os
-import glob
 import h5py
 import torch
 import trimesh
 import mesh2sdf
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Tuple, Optional, Union, Dict
-from torch.utils.data import Dataset, DataLoader,Sampler,RandomSampler
+from typing import Optional, Dict, Tuple, List
+from torch.utils.data import Dataset, DataLoader, RandomSampler, Subset
 import pytorch_lightning as pl
-from collections import defaultdict
 import pickle
 import logging
 from pathlib import Path
@@ -19,63 +17,32 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class DataSelector:
-    """
-    Flexible data selection criteria for grasps dataset.
-    """
-
-    grasp_id: Optional[str] = None
-    object_id: Optional[str] = None
-    item_name: Optional[str] = None
-
-    def matches(self, mesh_path: str, grasp_path: str) -> bool:
-        """Check if paths match the selection criteria.
-        We don't use the mesh_path here, because we know the mesh exists.
-        """
-        grasp_filename = os.path.basename(grasp_path)
-        if "_" in grasp_filename:
-            item_name, obj_id, grasp_value = grasp_filename.split("_")
-            grasp_value = grasp_value.replace(".h5", "")
-        else:
-            return False
-
-        if self.grasp_id and self.grasp_id != grasp_value:
-            return False
-        if self.object_id and self.object_id != obj_id:
-            return False
-        if self.item_name and self.item_name != item_name:
-            return False
-        return True
-
-
-@dataclass
 class CacheEntry:
     """Data structure for cached SDF and scale information."""
 
     sdf: np.ndarray
     scale_factor: float
-    timestamp: float  # For tracking cache freshness
-    mesh_hash: str  # For validating mesh contents
+    timestamp: float
 
 
-def compute_mesh_hash(mesh_path: str) -> str:
-    """Compute a hash of the mesh file contents."""
-    with open(mesh_path, "rb") as f:
-        return str(hash(f.read()))
-
-
-def process_mesh_to_sdf(mesh_path: str, size: int = 32) -> Tuple[np.ndarray, float]:
-    """Process a mesh to SDF with consistent scaling and centering."""
-    mesh = trimesh.load(mesh_path)
-
+def enforce_trimesh(mesh) -> trimesh.Trimesh:
     if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(
+        return trimesh.util.concatenate(
             tuple(
                 trimesh.Trimesh(vertices=m.vertices, faces=m.faces)
                 for m in mesh.geometry.values()
             )
         )
+    elif isinstance(mesh, trimesh.Trimesh):
+        return mesh
+    else:
+        raise ValueError(f"Unsupported mesh type: {type(mesh)}")
 
+
+def process_mesh_to_sdf(
+    mesh: trimesh.Trimesh, size: int = 32
+) -> Tuple[np.ndarray, float]:
+    """Process a mesh to SDF with consistent scaling and centering."""
     centroid = mesh.centroid
     vertices = mesh.vertices - centroid
     scale_factor = np.max(np.abs(vertices))
@@ -86,7 +53,7 @@ def process_mesh_to_sdf(mesh_path: str, size: int = 32) -> Tuple[np.ndarray, flo
     faces = faces.astype(np.uint32)
 
     # First compute raw SDF
-    raw_sdf = mesh2sdf.core.compute(vertices, faces, size)
+    raw_sdf = mesh2sdf.compute(vertices, faces, size)
     abs_sdf = np.abs(raw_sdf)
 
     # Choose a level value within the range of the absolute SDF
@@ -108,7 +75,6 @@ class SDFCache:
         self.cache = self._load_cache()
 
     def _load_cache(self) -> Dict[str, CacheEntry]:
-        """Load cache from disk if it exists."""
         if self.cache_file.exists():
             try:
                 with open(self.cache_file, "rb") as f:
@@ -119,68 +85,40 @@ class SDFCache:
         return {}
 
     def _save_cache(self):
-        """Save cache to disk."""
         try:
             with open(self.cache_file, "wb") as f:
                 pickle.dump(self.cache, f)
         except Exception as e:
             logger.error(f"Failed to save cache: {e}")
 
-    def get(self, mesh_path: str, size: int) -> Optional[Tuple[np.ndarray, float]]:
-        """Get SDF and scale factor from cache if available and valid."""
+    def get(self, mesh_path: str) -> Optional[Tuple[np.ndarray, float]]:
         if mesh_path not in self.cache:
             return None
 
         entry = self.cache[mesh_path]
-        current_hash = compute_mesh_hash(mesh_path)
-
-        if current_hash != entry.mesh_hash:
-            logger.info(f"Mesh {mesh_path} has changed, recomputing SDF")
-            return None
-
         return entry.sdf, entry.scale_factor
 
     def put(self, mesh_path: str, sdf: np.ndarray, scale_factor: float):
-        """Store SDF and scale factor in cache."""
         self.cache[mesh_path] = CacheEntry(
             sdf=sdf,
             scale_factor=scale_factor,
             timestamp=os.path.getmtime(mesh_path),
-            mesh_hash=compute_mesh_hash(mesh_path),
         )
         self._save_cache()
-
-class RepeatSampler(Sampler):
-    """Required for creating batches larger than the dataset."""
-
-    def __init__(self, data_source, batch_size):
-        self.data_source = data_source
-        self.batch_size = batch_size
-        self.num_repetitions = (batch_size + len(data_source) - 1) // len(data_source)
-    def __iter__(self):
-        # Repeat the indices to fill the batch
-        indices = list(range(len(self.data_source))) * self.num_repetitions
-        return iter(indices[:self.batch_size])
-
-    def __len__(self):
-        return self.batch_size
-    
 
 
 class GraspDataset(Dataset):
     def __init__(
         self,
         data_root: str,
-        selectors: Union[DataSelector, List[DataSelector]],
+        grasp_files: List[str],
         split: str = "train",
         num_samples: Optional[int] = None,
         sdf_size: int = 32,
         cache_dir: Optional[str] = None,
     ):
         self.data_root = data_root
-        self.selectors = (
-            [selectors] if isinstance(selectors, DataSelector) else selectors
-        )
+        self.grasp_files = grasp_files
         self.split = split
         self.num_samples = num_samples
         self.sdf_size = sdf_size
@@ -188,111 +126,84 @@ class GraspDataset(Dataset):
         # Initialize cache
         self.cache = SDFCache(cache_dir or os.path.join(data_root, "sdf_cache"))
 
-        # Get all meshes and grasps
-        mesh_pattern = os.path.join(data_root, "meshes/**/*.obj")
-        grasp_pattern = os.path.join(data_root, "grasps/*.h5")
-
-        self.meshes = glob.glob(mesh_pattern, recursive=True)
-        self.grasps = glob.glob(grasp_pattern)
-
-        # Group grasps by mesh
-        self.mesh_to_grasps = self._create_mesh_grasp_mapping()
-
-        # Process meshes to SDFs using cache
+        # Process meshes and grasps
         self.mesh_to_sdf = {}
         self.mesh_to_scale = {}
-        self._compute_all_sdfs()
+        self.processed_data = []  # List to store all processed grasps
 
-        # Load transforms
-        self.mesh_to_transforms = {}
-        self._load_all_transforms()
+        # Process all grasp files and their corresponding meshes
+        self._process_all_data()
 
-        # Create index
-        self._create_index()
+        # Sample if needed
+        if num_samples and num_samples < len(self.processed_data):
+            indices = torch.randperm(len(self.processed_data))[:num_samples]
+            self.processed_data = [self.processed_data[i] for i in indices]
 
-    def _compute_all_sdfs(self):
-        """Compute or load from cache SDFs for all unique meshes."""
-        total_meshes = len(self.mesh_to_grasps)
-        for idx, mesh_path in enumerate(self.mesh_to_grasps.keys(), 1):
-            logger.info(
-                f"Processing mesh {idx}/{total_meshes}: {os.path.basename(mesh_path)}"
-            )
+    def _process_all_data(self):
+        """Process all grasp files and their corresponding meshes."""
+        total_files = len(self.grasp_files)
 
-            # Try to get from cache
-            cache_result = self.cache.get(mesh_path, self.sdf_size)
+        for idx, grasp_filename in enumerate(self.grasp_files, 1):
+            # Construct full path to grasp file
+            grasp_file = os.path.join(self.data_root, "grasps", grasp_filename)
+            logger.info(f"Processing grasp file {idx}/{total_files}: {grasp_filename}")
 
-            if cache_result is not None:
-                sdf, scale_factor = cache_result
-                logger.info(f"Loaded {os.path.basename(mesh_path)} from cache")
-            else:
-                logger.info(f"Computing SDF for {os.path.basename(mesh_path)}")
-                sdf, scale_factor = process_mesh_to_sdf(mesh_path, self.sdf_size)
-                self.cache.put(mesh_path, sdf, scale_factor)
+            # Load grasp file and get mesh information
+            with h5py.File(grasp_file, "r") as h5file:
+                mesh_fname = h5file["object/file"][()].decode("utf-8")
+                mesh_scale = h5file["object/scale"][()]
 
-            self.mesh_to_sdf[mesh_path] = sdf
-            self.mesh_to_scale[mesh_path] = scale_factor
+                # Load transforms and filter successful grasps
+                transforms = h5file["grasps"]["transforms"][:]
+                grasp_success = h5file["grasps"]["qualities"]["flex"][
+                    "object_in_gripper"
+                ][:]
+                transforms = transforms[grasp_success == 1]
 
-    def _load_all_transforms(self):
-        """Load and scale transforms for all meshes."""
-        for mesh_path, grasp_files in self.mesh_to_grasps.items():
+            # Load and scale mesh
+            mesh_path = os.path.join(self.data_root, mesh_fname)
+
+            # Process mesh to SDF if not in cache
+            if mesh_path not in self.mesh_to_sdf:
+                cache_result = self.cache.get(mesh_path)
+
+                if cache_result is not None:
+                    sdf, scale_factor = cache_result
+                    logger.info(f"Loaded {os.path.basename(mesh_path)} from cache")
+                else:
+                    mesh = trimesh.load(mesh_path)
+                    mesh = mesh.apply_scale(mesh_scale)
+                    mesh = enforce_trimesh(mesh)
+
+                    logger.info(f"Computing SDF for {os.path.basename(mesh_path)}")
+                    sdf, scale_factor = process_mesh_to_sdf(mesh, self.sdf_size)
+                    self.cache.put(mesh_path, sdf, scale_factor)
+
+                self.mesh_to_sdf[mesh_path] = sdf
+                self.mesh_to_scale[mesh_path] = scale_factor
+
+            # Scale and store transforms
             scale_factor = self.mesh_to_scale[mesh_path]
-
-            transforms_list = []
-            for grasp_file in grasp_files:
-                with h5py.File(grasp_file, "r") as h5file:
-                    transforms = h5file["grasps"]["transforms"][:]
-                    grasp_sucess = h5file['grasps']['qualities']['flex']['object_in_gripper'][:]
-                    mask = grasp_sucess == 1
-                    transforms = transforms[mask]
-                    # Scale translations
-                    for transform in transforms:
-                        #TODO: Correct this
-                        transform[:3, 3] = transform[:3, 3] / scale_factor * 2.0
-                    transforms_list.extend(transforms)
-
-            self.mesh_to_transforms[mesh_path] = torch.tensor(
-                transforms_list, dtype=torch.float32
-            )
-
-    def _create_mesh_grasp_mapping(self) -> Dict[str, List[str]]:
-        """Create mapping from mesh paths to corresponding grasp files."""
-        mesh_to_grasps = defaultdict(list)
-
-        for grasp in self.grasps:
-            grasp_filename = os.path.basename(grasp)
-            if "_" not in grasp_filename:
-                continue
-
-            item_name, obj_id, _ = grasp_filename.split("_", 2)
-            matching_meshes = [m for m in self.meshes if obj_id in m and item_name in m]
-
-            if not matching_meshes:
-                continue
-
-            mesh = matching_meshes[0]
-            if any(selector.matches(mesh, grasp) for selector in self.selectors):
-                mesh_to_grasps[mesh].append(grasp)
-
-        return mesh_to_grasps
-
-    def _create_index(self):
-        """Create flat index for accessing data."""
-        self.index = []
-        for mesh_path, transforms in self.mesh_to_transforms.items():
-            num_transforms = len(transforms)
-            self.index.extend([(mesh_path, i) for i in range(num_transforms)])
-
-        if self.num_samples and self.num_samples < len(self.index):
-            indices = torch.randperm(len(self.index))[: self.num_samples]
-            self.index = [self.index[i] for i in indices]
+            for transform in transforms:
+                scaled_transform = transform.copy()
+                scaled_transform[:3, 3] = scaled_transform[:3, 3] / scale_factor
+                self.processed_data.append(
+                    {
+                        "mesh_path": mesh_path,
+                        "transform": torch.tensor(
+                            scaled_transform, dtype=torch.float32
+                        ),
+                    }
+                )
 
     def __len__(self):
-        return len(self.index)
+        return len(self.processed_data)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        mesh_path, transform_idx = self.index[idx]
+        data_point = self.processed_data[idx]
+        mesh_path = data_point["mesh_path"]
+        transform = data_point["transform"]
 
-        transform = self.mesh_to_transforms[mesh_path][transform_idx]
         rotation = transform[:3, :3]
         translation = transform[:3, 3]
         sdf = torch.tensor(self.mesh_to_sdf[mesh_path])
@@ -303,7 +214,7 @@ class GraspDataModule(pl.LightningDataModule):
     def __init__(
         self,
         data_root: str,
-        selectors: Union[DataSelector, List[DataSelector]],
+        grasp_files: List[str],
         sampler_opt: Optional[str] = None,
         batch_size: int = 32,
         num_workers: int = 4,
@@ -313,56 +224,75 @@ class GraspDataModule(pl.LightningDataModule):
     ):
         super().__init__()
         self.data_root = data_root
-        self.selectors = selectors
-        self.sampler_opt = sampler_opt # to create batches bigger than the dataset
+        self.grasp_files = grasp_files
+        self.sampler_opt = sampler_opt
         self.batch_size = batch_size
-        self.num_workers = num_workers # currently it is 0 because new workers are created after each epoch
+        self.num_workers = num_workers
         self.num_samples = num_samples
         self.cache_dir = cache_dir
         self.train_val_test_split = train_val_test_split
 
     def setup(self, stage: Optional[str] = None):
+        # Create full dataset first
+        full_dataset = GraspDataset(
+            self.data_root,
+            self.grasp_files,
+            num_samples=None,  # Don't sample yet
+            cache_dir=self.cache_dir,
+        )
+
+        # Calculate split sizes
+        total_size = len(full_dataset)
+        train_size = int(total_size * self.train_val_test_split[0])
+        val_size = int(total_size * self.train_val_test_split[1])
+
+        # Create indices for splits using cumulative sizes
+        indices = torch.randperm(total_size).tolist()
+        train_end = train_size
+        val_end = train_size + val_size
+
+        train_indices = indices[:train_end]
+        val_indices = indices[train_end:val_end]
+        test_indices = indices[val_end:]  # Everything remaining goes to test
+
+        # Create split datasets
         if stage == "fit" or stage is None:
-            self.train_dataset = GraspDataset(
-                self.data_root,
-                self.selectors,
-                split="train",
-                num_samples=self.num_samples,
-                cache_dir=self.cache_dir,
+            self.train_dataset = Subset(full_dataset, train_indices)
+            self.val_dataset = Subset(full_dataset, val_indices)
+
+            # Apply sampling if specified
+            if self.num_samples:
+                train_indices = torch.randperm(len(self.train_dataset))[
+                    : self.num_samples
+                ]
+                self.train_dataset = Subset(self.train_dataset, train_indices)
+
+            # Setup sampler
+            num_samples = (
+                self.batch_size
+                if self.sampler_opt == "repeat"
+                else len(self.train_dataset)
             )
-            self.val_dataset = GraspDataset(
-                self.data_root,
-                self.selectors,
-                split="val",
-                num_samples=self.num_samples,
-                cache_dir=self.cache_dir,
+            self.sampler = RandomSampler(
+                data_source=self.train_dataset,
+                num_samples=num_samples,
             )
-        num_samples = self.batch_size if self.sampler_opt == 'repeat' else len(self.train_dataset)
-        self.sampler = RandomSampler(data_source = self.train_dataset,num_samples = num_samples)
 
         if stage == "test" or stage is None:
-            self.test_dataset = GraspDataset(
-                self.data_root,
-                self.selectors,
-                split="test",
-                num_samples=self.num_samples,
-                cache_dir=self.cache_dir,
-            )
+            self.test_dataset = Subset(full_dataset, test_indices)
 
     def train_dataloader(self):
-
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            #shuffle=True,
             num_workers=self.num_workers,
-            sampler = self.sampler,
+            sampler=self.sampler,
         )
 
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
-            batch_size=1,#self.batch_size, for now just to see if grasps improve
+            batch_size=1,
             shuffle=False,
             num_workers=self.num_workers,
         )

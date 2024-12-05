@@ -11,9 +11,8 @@ from datetime import datetime
 import atexit
 
 from .utils import load_config, get_device
-from data.grasp_dataset import DataLoader, DataSelector, GraspDataModule
+from data.grasp_dataset import GraspDataModule
 from models.se3lightning import SE3FMModule
-
 
 
 def cleanup_wandb():
@@ -26,6 +25,9 @@ def cleanup_wandb():
 
 def train(experiment: str = "sanity_check"):
     """Train the model with lightning."""
+
+    # pass
+
     # Register cleanup function
     atexit.register(cleanup_wandb)
 
@@ -33,7 +35,7 @@ def train(experiment: str = "sanity_check"):
         # Load configuration
         cfg = load_config(experiment)
 
-        #TODO: Utilize device
+        # TODO: Utilize device
         device = get_device()
 
         # Setup unique run name if not specified
@@ -55,17 +57,10 @@ def train(experiment: str = "sanity_check"):
         wandb_logger.log_hyperparams(cfg)
         wandb.save(experiment)  # Save the original config file as an artifact
 
-        # Initialize data handler
-        selector = DataSelector(
-            grasp_id=cfg["data"].get("grasp_id"),
-            object_id=cfg["data"].get("object_id"),
-            item_name=cfg["data"].get("item_name"),
-        )
-
         # Initialize DataModule with multiple selectors
         grasp_data = GraspDataModule(
             data_root=cfg["data"]["data_path"],
-            selectors=selector,  # Using list of selectors
+            grasp_files=cfg["data"]["grasp_files"],  # Using list of selectors
             sampler_opt=cfg["data"]["sampler_opt"],
             batch_size=cfg["data"]["batch_size"],
             num_samples=1,  # Optional: limit total samples
@@ -121,14 +116,16 @@ def train(experiment: str = "sanity_check"):
             max_epochs=cfg["trainer"]["max_epochs"],
             accelerator="cpu",  # Change this to explicitly use CPU
             devices=1,  # Use single CPU device
-            precision=cfg["trainer"]["precision"],  # Currently we force 64-bit precision
+            precision=cfg["trainer"][
+                "precision"
+            ],  # Currently we force 64-bit precision
             gradient_clip_val=cfg["trainer"]["gradient_clip_val"],
             accumulate_grad_batches=cfg["trainer"]["accumulate_grad_batches"],
-            #val_check_interval=cfg["trainer"]["val_check_interval"], we check every n epochs currently
+            # val_check_interval=cfg["trainer"]["val_check_interval"], we check every n epochs currently
             check_val_every_n_epoch=cfg["trainer"]["check_val_every_n_epoch"],
             log_every_n_steps=cfg["trainer"]["log_every_n_steps"],
         )
-        
+
         # Add this right before trainer.fit()
         wandb.require("service")
 
@@ -150,6 +147,7 @@ def train(experiment: str = "sanity_check"):
         # Ensure wandb is properly closed
         cleanup_wandb()
         print("\nWandB run closed. Exiting...")
+
 
 if __name__ == "__main__":
     train()
