@@ -1,6 +1,5 @@
 import torch
 import trimesh
-import numpy as np
 
 from core.utils import load_config
 from data.grasp_dataset import GraspDataset
