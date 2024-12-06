@@ -1,8 +1,49 @@
 import torch
 import trimesh
+
 from core.utils import load_config
-from data.acronym import create_gripper_marker
 from data.grasp_dataset import GraspDataset
+
+
+def create_gripper_marker(color=[0, 0, 255], sections=6) -> trimesh.Trimesh:
+    """Create a 3D mesh visualizing a parallel yaw gripper. It consists of four cylinders.
+
+    Args:
+        color (list, optional): RGB values of marker. Defaults to [0, 0, 255].
+        sections (int, optional): Number of sections of each cylinder. Defaults to 6.
+
+    Returns:
+        trimesh.Trimesh: A mesh that represents a simple parallel yaw gripper.
+    """
+    cfl = trimesh.creation.cylinder(
+        radius=0.002,
+        sections=sections,
+        segment=[
+            [4.10000000e-02, -7.27595772e-12, 6.59999996e-02],
+            [4.10000000e-02, -7.27595772e-12, 1.12169998e-01],
+        ],
+    )
+    cfr = trimesh.creation.cylinder(
+        radius=0.002,
+        sections=sections,
+        segment=[
+            [-4.100000e-02, -7.27595772e-12, 6.59999996e-02],
+            [-4.100000e-02, -7.27595772e-12, 1.12169998e-01],
+        ],
+    )
+    cb1 = trimesh.creation.cylinder(
+        radius=0.002, sections=sections, segment=[[0, 0, 0], [0, 0, 6.59999996e-02]]
+    )
+    cb2 = trimesh.creation.cylinder(
+        radius=0.002,
+        sections=sections,
+        segment=[[-4.100000e-02, 0, 6.59999996e-02], [4.100000e-02, 0, 6.59999996e-02]],
+    )
+
+    tmp = trimesh.util.concatenate([cb1, cb2, cfr, cfl])
+    tmp.visual.face_colors = color
+
+    return tmp
 
 
 def visualize(experiment: str = "visualize"):
