@@ -1,5 +1,6 @@
 import torch
 import trimesh
+import numpy as np
 
 from core.utils import load_config
 from data.grasp_dataset import GraspDataset
@@ -46,14 +47,35 @@ def create_gripper_marker(color=[0, 0, 255], sections=6) -> trimesh.Trimesh:
     return tmp
 
 
+def check_collision(gripper_mesh: trimesh.Trimesh, obj_mesh: trimesh.Trimesh) -> bool:
+    """Check if there is a collision between the gripper and object meshes.
+
+    Args:
+        gripper_mesh (trimesh.Trimesh): The gripper mesh
+        obj_mesh (trimesh.Trimesh): The object mesh
+
+    Returns:
+        bool: True if there is a collision, False otherwise
+    """
+    # Check for collisions between the meshes
+    # We use the built-in collision manager from trimesh
+    manager = trimesh.collision.CollisionManager()
+    manager.add_object("object", obj_mesh)
+
+    # Check if the gripper collides with the object
+    is_collision = manager.in_collision_single(gripper_mesh)
+
+    return is_collision
+
+
 def visualize(experiment: str = "visualize"):
-    """Visualize an existing grasp from the dataset."""
+    """Visualize an existing grasp from the dataset and check for collisions."""
 
     cfg = load_config(experiment)
 
     test = GraspDataset(
         data_root=cfg["data"]["data_path"],
-        grasp_files=cfg["data"]["grasp_files"],  # Using list of selectors
+        grasp_files=cfg["data"]["grasp_files"],
         num_samples=cfg["data"]["num_samples"],
         split="test",
         use_cache=False,
@@ -70,24 +92,41 @@ def visualize(experiment: str = "visualize"):
 
     print("SO3 Input:", so3_input)
     print("R3 Input:", r3_input)
-    # print("SDF Input:", sdf_input)
     print("Mesh Path:", mesh_path)
     print("Normalization Scale:", normalization_scale)
     print("Dataset Mesh Scale:", dataset_mesh_scale)
 
+    # Load and scale the object mesh
     obj_mesh = trimesh.load(mesh_path)
     obj_mesh = obj_mesh.apply_scale(dataset_mesh_scale)
 
+    # Create the transformation matrix
     transform = torch.eye(4)
     transform[:3, :3] = so3_input[:3, :3] * normalization_scale
     transform[:3, 3] = r3_input.squeeze() * normalization_scale
-    transform = transform
+    transform = transform.numpy()  # Convert to numpy for trimesh
 
     print("Transform:", transform)
 
-    # create visual markers for grasps
-    successful_grasps = [
-        create_gripper_marker(color=[0, 255, 0]).apply_transform(transform)
-    ]
+    # Create the gripper mesh with initial green color
+    gripper = create_gripper_marker(color=[0, 255, 0])
+    # Apply the transform to position the gripper
+    gripper = gripper.apply_transform(transform)
 
-    trimesh.Scene([obj_mesh] + successful_grasps).show()
+    # Check for collisions
+    has_collision = check_collision(gripper, obj_mesh)
+
+    # Set the color based on collision status
+    color = (
+        [255, 0, 0] if has_collision else [0, 255, 0]
+    )  # Red if collision, green if not
+    gripper.visual.face_colors = color
+
+    # Create the visualization scene
+    scene = trimesh.Scene([obj_mesh, gripper])
+
+    # Print collision status
+    print(f"Collision detected: {has_collision}")
+
+    # Show the scene
+    scene.show()
