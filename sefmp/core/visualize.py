@@ -38,9 +38,11 @@ def visualize(experiment: str = "visualize"):
     obj_mesh = obj_mesh.apply_scale(dataset_mesh_scale)
 
     transform = torch.eye(4)
-    transform[:3, :3] = so3_input[:3, :3]
-    transform[:3, 3] = r3_input.squeeze()
-    transform = transform * normalization_scale
+    transform[:3, :3] = so3_input[:3, :3] * normalization_scale
+    transform[:3, 3] = r3_input.squeeze() * normalization_scale
+    transform = transform
+
+    print("Transform:", transform)
 
     # create visual markers for grasps
     successful_grasps = [
