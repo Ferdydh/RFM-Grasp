@@ -65,8 +65,6 @@ class PandaGraspTester(PandaBase):
             p.resetJointState(self.robot, joint_id, pose)
 
         # Reset gripper joints
-        print(self.max_grip_aperture)
-
         for joint_id in self.gripper_joint_ids:
             p.resetJointState(self.robot, joint_id, self.max_grip_aperture)
 
@@ -99,8 +97,8 @@ class PandaGraspTester(PandaBase):
             )
             print(f"Collision shape ID: {col_shape}")
 
-            # Adjusted position for better grasping
-            base_pos = [0.0, 0.0, 0.0]  # Closer to robot, lower to ground
+            # TODO: Adjust this so the grasp is successful
+            base_pos = [-0.2, -0.05, 0.10]  # Matches the SE3 target position
             base_orn = p.getQuaternionFromEuler([0, 0, 0])  # No rotation
 
             # Create the multibody with the new position
