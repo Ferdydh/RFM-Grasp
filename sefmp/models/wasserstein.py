@@ -47,7 +47,7 @@ def pairwise_geodesic_distance(x0, x1):
     n_samples_x1 = x1.shape[0]
 
     # Expand dimensions to compute all pairwise products
-    x0_exp = x0.unsqueeze(1).expand(n_samples_x0, n_samples_x1, 3, 3)
+    x0_exp = x0.expand(n_samples_x0, n_samples_x1, 3, 3)
     x1_exp = x1.unsqueeze(0).expand(n_samples_x0, n_samples_x1, 3, 3)
 
     # Compute relative rotations

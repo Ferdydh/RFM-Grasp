@@ -247,7 +247,7 @@ class GraspDataset(Dataset):
                     # Scale translations
                     for transform in transforms:
                         #TODO: Correct this
-                        transform[:3, 3] = transform[:3, 3] / scale_factor * 2.0
+                        transform[:3, 3] = transform[:3, 3] #/ scale_factor * 2.0
                     transforms_list.extend(transforms)
 
             self.mesh_to_transforms[mesh_path] = torch.tensor(
@@ -362,8 +362,8 @@ class GraspDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
-            batch_size=1,#self.batch_size, for now just to see if grasps improve
-            shuffle=False,
+            batch_size=8,#self.batch_size, for now just to see if grasps improve
+            shuffle=True,
             num_workers=self.num_workers,
         )
 

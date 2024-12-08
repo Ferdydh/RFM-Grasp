@@ -68,7 +68,7 @@ def train(experiment: str = "sanity_check"):
             selectors=selector,  # Using list of selectors
             sampler_opt=cfg["data"]["sampler_opt"],
             batch_size=cfg["data"]["batch_size"],
-            num_samples=1,  # Optional: limit total samples
+            num_samples=cfg["data"]["sample_limit"],  # Optional: limit total samples
             num_workers=cfg["data"]["num_workers"],
         )
 

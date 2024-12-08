@@ -47,6 +47,7 @@ class SE3FMModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):  # We will add conditioning here
         so3_input, r3_input, sdf_input = batch
+
         # TODO: Implement log dict here
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
         if batch_idx % 100 == 0:    
@@ -54,7 +55,10 @@ class SE3FMModule(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        
         so3_input, r3_input, sdf_input = batch
+
+        print("SO3 Input:", so3_input.shape, "\nR3 Input:", r3_input.shape)
         #These generate function later only take sdf input
         # Loss here is does care about generation, 
         # it is not about time t velocity estimation
@@ -70,20 +74,20 @@ class SE3FMModule(pl.LightningModule):
         # Calculate Wasserstein distance the calculation 
         # at the top won't be used if we use this
 
-        # r3_wasserstein = wasserstein_distance(
-        #     r3_generated, r3_input, space="r3", method="exact", power=2
-        # )
-        # so3_wasserstein = wasserstein_distance(
-        #     so3_generated, so3_input, space="so3", method="exact", power=2
-        # )
+        r3_wasserstein = wasserstein_distance(
+            r3_generated, r3_input, space="r3", method="exact", power=2
+        )
+        so3_wasserstein = wasserstein_distance(
+            so3_generated, so3_input, space="so3", method="exact", power=2
+        )
         
         ## Calculate total validation loss
         # val_loss = r3_wasserstein + so3_wasserstein
         
         ## Log metrics with val/ prefix
         # self.log('val/loss', val_loss, prog_bar=True)
-        # self.log('val/r3_wasserstein', r3_wasserstein)
-        # self.log('val/so3_wasserstein', so3_wasserstein)
+        self.log('val/r3_wasserstein', r3_wasserstein)
+        self.log('val/so3_wasserstein', so3_wasserstein)
         
         val_loss = torch.mean(torch.abs(r3_generated - r3_input)) + torch.mean(torch.abs(so3_generated - so3_input))
 

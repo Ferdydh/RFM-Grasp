@@ -181,4 +181,4 @@ class SO3FM(nn.Module):
             traj = self.inference(traj, t, dt)
             
         final_traj = rearrange(traj, "b (c d) -> b c d", c=3, d=3)
-        return final_traj[-1]
+        return final_traj
