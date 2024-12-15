@@ -1,41 +1,57 @@
+import h5py
 import numpy as np
-from grasp_tester import PandaGraspTester
 import time
 import os
 
+from robot import PandaConfig, PandaRobot
+
 
 def main():
-    # Define test object path
-    object_filepath = os.path.join("../models", "basket.obj")
+    data_path = "../../data/"
+    # grasp_path = (
+    #     "grasps/3Shelves_667bec36787219ba959d688c13bc4d6e_0.0015840344930117929.h5"
+    # )
 
-    mesh_scale = 0.0093761727
-    SE3 = np.array(
-        [
-            [0.1479, -0.9865, 0.0702, 0.4750],
-            [-0.9865, -0.1522, -0.0604, 0.0168],
-            [0.0702, -0.0604, -0.9957, 0.2541],
-            [0.0000, 0.0000, 0.0000, 1],
-        ]
+    # grasp_path = "grasps/Bear_345b945db322120d4cccbece4754c7cf_0.013295782781187739.h5"
+    grasp_path = "grasps/Desk_a02b052927a00a58568f5d1b69b4d09f_0.0015754220237984534.h5"
+    # grasp_path = (
+    #     "grasps/Bucket_997f1218df2b1909ce0e7190fd762087_0.009372396151638597.h5"
+    # )
+    # grasp_path = (
+    #     "grasps/Chaise_a9ec4ed3925dc1482db431502a680805_0.0018421146734938327.h5"
+    # )
+
+    with h5py.File(
+        os.path.join(data_path, grasp_path),
+        "r",
+    ) as h5file:
+        config = PandaConfig.from_grasp_file(h5file)
+        transforms = h5file["grasps"]["transforms"][:]
+        grasp_success = h5file["grasps"]["qualities"]["flex"]["object_in_gripper"][:]
+        transforms = transforms[grasp_success == 1]
+
+        SE3 = transforms[0]
+
+    config.object_filepath = os.path.join(
+        data_path, config.object_filepath.decode("utf-8")
     )
 
-    # Initialize robot with test object - much larger scale
-    robot = PandaGraspTester(
-        object_filepath=object_filepath,
-        mesh_scale=mesh_scale,  # Increased from 0.001 to 0.05
-        realtime=1,
-    )
+    # print(config)
+    print("SE3: ", SE3)
+
+    ####################################################################################################
+
+    robot = PandaRobot(config)
 
     # Let simulation settle
     print("Letting simulation settle...")
     for _ in range(100):
         robot.step()
-        if robot.realtime:
-            time.sleep(robot.stepsize)
 
     # Get current object pose
-    obj_pos, obj_orn = robot.get_object_pose()
-    print(f"\nObject position: {obj_pos}")
-    print(f"Object orientation: {obj_orn}")
+    # obj_pos, obj_orn = robot.get_object_pose()
+    # print(f"\nObject position: {obj_pos}")
+    # print(f"Object orientation: {obj_orn}")
 
     # Run grasp test
     success = robot.test_grasp(SE3)
@@ -45,8 +61,6 @@ def main():
     print("\nKeeping simulation alive for visualization...")
     while True:
         robot.step()
-        if robot.realtime:
-            time.sleep(robot.stepsize)
 
 
 if __name__ == "__main__":
