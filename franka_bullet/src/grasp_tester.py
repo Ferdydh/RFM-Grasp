@@ -6,13 +6,13 @@ from panda_base import PandaBase
 
 
 class PandaGraspTester(PandaBase):
-    def __init__(self, object_filepath, mesh_scale=1.0, stepsize=1e-3, realtime=0):
+    def __init__(self, object_filepath, mesh_scale=1.0, stepsize=1e-3, obj_pos=[0,0,0],start_pos=None,realtime=0):
         # Set this here because of the complicated logic between reset() and load_test_object()
         # So this is a hacky way to set the max_grip_aperture to be used in reset()
         # We can make this code better by combinining both classes PandaBase and PandaGraspTester
         # But let's just keep it for now
         self.max_grip_aperture = 0.08  # 8cm maximum grip aperture
-
+        self.start_pos = None#start_pos
         super().__init__(stepsize, realtime)
         # Modified gripper parameters
         self.grip_force_threshold = 5.0  # N
@@ -21,7 +21,10 @@ class PandaGraspTester(PandaBase):
         # Object parameters
         self.object_filepath = object_filepath
         self.mesh_scale = mesh_scale
+        #self.obj_pos = np.array(obj_pos)
 
+        
+        
         # Load test object
         self.load_test_object()
 
@@ -39,9 +42,9 @@ class PandaGraspTester(PandaBase):
 
         # The first 7 joints are the arm joints
         self.arm_joint_ids = list(range(7))
-
-        # Get gripper joint IDs (assuming they're the last two joints)
-        self.gripper_joint_ids = [7, 8]
+        #the joint 7 is the hand joint which is a fixed joint
+        # Get gripper joint IDs
+        self.gripper_joint_ids = [8, 9]
 
         # Get joint limits
         self.joint_limits_lower = []
@@ -51,22 +54,27 @@ class PandaGraspTester(PandaBase):
             self.joint_limits_lower.append(joint_info[8])
             self.joint_limits_upper.append(joint_info[9])
 
-        self.ee_id = 8  # End effector link ID
+        self.ee_id = 7  # End effector link ID of palm
 
         self.reset()
 
     def reset(self):
         """Reset robot to initial configuration"""
         self.t = 0.0
-        initial_poses = [0.0, -0.785, 0.0, -2.356, 0.0, 1.57, 0.785]  # Home position
+        if self.start_pos is not None:
+            initial_poses = self.SE3_to_joint_positions(self.start_pos)
+        else:
+            initial_poses = [0.0, -0.785, 0.0, -2.356, 0.0, 1.57, 0.785]
+            initial_gripper_poses = [self.max_grip_aperture/2]*2
+            print(initial_gripper_poses)
 
         # Reset arm joints
         for joint_id, pose in zip(self.arm_joint_ids, initial_poses):
             p.resetJointState(self.robot, joint_id, pose)
 
         # Reset gripper joints
-        for joint_id in self.gripper_joint_ids:
-            p.resetJointState(self.robot, joint_id, self.max_grip_aperture)
+        for joint_id,gripper_pose in zip(self.gripper_joint_ids,initial_gripper_poses):
+            p.resetJointState(self.robot, joint_id, gripper_pose)
 
     def load_test_object(self):
         """Load the test object mesh"""
@@ -84,7 +92,7 @@ class PandaGraspTester(PandaBase):
             vis_shape = p.createVisualShape(
                 shapeType=p.GEOM_MESH,
                 fileName=self.object_filepath,
-                meshScale=[self.mesh_scale] * 3,
+                meshScale=[1]*3,#[self.mesh_scale] * 3,
                 rgbaColor=[0.8, 0.8, 0.8, 1],
             )
             print(f"Visual shape ID: {vis_shape}")
@@ -93,7 +101,7 @@ class PandaGraspTester(PandaBase):
             col_shape = p.createCollisionShape(
                 shapeType=p.GEOM_MESH,
                 fileName=self.object_filepath,
-                meshScale=[self.mesh_scale] * 3,
+                meshScale=[1]*3,#[self.mesh_scale] * 3,
             )
             print(f"Collision shape ID: {col_shape}")
 
@@ -103,22 +111,22 @@ class PandaGraspTester(PandaBase):
 
             # Create the multibody with the new position
             self.test_object = p.createMultiBody(
-                baseMass=0.1,  # Light mass
+                baseMass=2,  # Light mass
                 baseCollisionShapeIndex=col_shape,
                 baseVisualShapeIndex=vis_shape,
-                basePosition=base_pos,
-                baseOrientation=base_orn,
+                #basePosition=self.obj_pos,
+                #baseOrientation=base_orn,
             )
             print(f"Object ID: {self.test_object}")
-            print(f"Object position: {base_pos}")
+            #print(f"Object position: {self.obj_pos}")
 
             # Set appropriate friction coefficients
             p.changeDynamics(
                 self.test_object,
                 -1,
-                lateralFriction=0.8,
-                spinningFriction=0.05,
-                rollingFriction=0.05,
+                lateralFriction=1,
+                spinningFriction=1,#0.05,
+                rollingFriction=1,#0.05,
                 restitution=0.2,
                 contactStiffness=5000,
                 contactDamping=50,
@@ -171,7 +179,7 @@ class PandaGraspTester(PandaBase):
                 bodyUniqueId=self.robot,
                 jointIndices=self.gripper_joint_ids,
                 controlMode=p.VELOCITY_CONTROL,
-                targetVelocities=[-self.finger_velocity] * 2,
+                targetVelocities=[-self.finger_velocity, -self.finger_velocity],
                 forces=[self.max_torque[0]] * 2,
             )
 
@@ -226,6 +234,8 @@ class PandaGraspTester(PandaBase):
             # Set joint positions for arm
             self.set_joint_positions(joint_positions[:7])
             self.step()
+
+
 
     def check_grasp(self):
         """Check if object is still in contact with both fingers"""

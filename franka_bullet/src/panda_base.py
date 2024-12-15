@@ -4,7 +4,7 @@ import time
 
 
 class PandaBase:
-    def __init__(self, stepsize=1e-3, realtime=0):
+    def __init__(self, stepsize=5e-4, realtime=0):
         self.t = 0.0
         self.stepsize = stepsize
         self.realtime = realtime
@@ -53,7 +53,7 @@ class PandaBase:
             self.joint_limits_lower.append(joint_info[8])
             self.joint_limits_upper.append(joint_info[9])
 
-        self.ee_id = 8  # End effector link ID
+        self.ee_id = 7  # End effector link ID
 
         self.reset()
 
@@ -126,6 +126,8 @@ class PandaBase:
                 qy = (R[1, 2] + R[2, 1]) / S
                 qz = 0.25 * S
         return [qx, qy, qz, qw]
+    
+
 
     def SE3_to_joint_positions(self, SE3):
         """Convert SE3 pose to joint positions using inverse kinematics"""
@@ -141,15 +143,15 @@ class PandaBase:
                 endEffectorLinkIndex=self.ee_id,
                 targetPosition=position,
                 targetOrientation=quaternion,
-                lowerLimits=self.joint_limits_lower,
-                upperLimits=self.joint_limits_upper,
-                jointRanges=[
-                    u - l
-                    for u, l in zip(self.joint_limits_upper, self.joint_limits_lower)
-                ],
+                # lowerLimits=self.joint_limits_lower,
+                # upperLimits=self.joint_limits_upper,
+                # jointRanges=[
+                #     u - l
+                #     for u, l in zip(self.joint_limits_upper, self.joint_limits_lower)
+                # ],
                 restPoses=current_poses,
-                maxNumIterations=100,
-                residualThreshold=1e-5,
+                maxNumIterations=10000,
+                residualThreshold=1e-7,
             )
             return list(joint_positions[:7])  # Return only arm joint positions
         except p.error as e:
@@ -163,6 +165,7 @@ class PandaBase:
         try:
             start_positions = self.get_joint_states()[0]
             target_positions = self.SE3_to_joint_positions(SE3)
+            print("Target positions:", target_positions)
 
             steps = int(duration / self.stepsize)
             for i in range(steps):
@@ -173,6 +176,79 @@ class PandaBase:
                 ]
                 self.set_joint_positions(interpolated_positions)
                 self.step()
+                if i == steps - 1:
+                    link_state = p.getLinkState(self.robot, self.ee_id)
+                    pos = link_state[4]  # Get the position
+                    orn = link_state[5]  # Get the orientation (quaternion)
+                    rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+                    current_SE3 = np.eye(4)
+                    current_SE3[:3, :3] = rot_matrix
+                    current_SE3[:3, 3] = pos
+                    print("Current SE3:", current_SE3)
+                    print("Target pose", SE3)
+                    print("Current joint pose",self.get_joint_states()[0])
+        # Convert link state to SE3
+
         except Exception as e:
             print(f"Failed to move to pose: {e}")
             raise
+
+    def move_to_pose(self, target_SE3, duration=2.0):
+        """Move to target SE3 pose with Cartesian interpolation."""
+        try:
+            # Get start pose
+            link_state = p.getLinkState(self.robot, self.ee_id)
+            start_pos = np.array(link_state[4])
+            start_orn = np.array(link_state[5])  # quaternion
+            start_rot = np.array(p.getMatrixFromQuaternion(start_orn)).reshape(3, 3)
+
+            # Create start SE3
+            start_SE3 = np.eye(4)
+            start_SE3[:3, :3] = start_rot
+            start_SE3[:3, 3] = start_pos
+
+            # Extract target position and rotation
+            target_pos = target_SE3[:3, 3]
+            target_rot = target_SE3[:3, :3]
+
+            # Convert rotations to quaternions for SLERP
+            start_quat = self.rot2quat(start_rot)
+            target_quat = self.rot2quat(target_rot)
+
+            steps = int(duration / self.stepsize)
+            for i in range(steps):
+                alpha = (i + 1) / steps
+
+                # Interpolate position linearly
+                pos = start_pos + alpha * (target_pos - start_pos)
+
+                # Interpolate rotation using SLERP
+                orn = p.getQuaternionSlerp(start_quat, target_quat, alpha)
+                rot = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+
+                # Create interpolated SE3
+                interpolated_SE3 = np.eye(4)
+                interpolated_SE3[:3, :3] = rot
+                interpolated_SE3[:3, 3] = pos
+
+                # Convert to joint positions using IK
+                target_joints = self.SE3_to_joint_positions(interpolated_SE3)
+                self.set_joint_positions(target_joints)
+                self.step()
+
+                if i == steps - 1:
+                    # Print final pose
+                    final_state = p.getLinkState(self.robot, self.ee_id)
+                    final_pos = final_state[4]
+                    final_orn = final_state[5]
+                    final_rot = np.array(p.getMatrixFromQuaternion(final_orn)).reshape(3, 3)
+                    final_SE3 = np.eye(4)
+                    final_SE3[:3, :3] = final_rot
+                    final_SE3[:3, 3] = final_pos
+                    print("Final SE3:", final_SE3)
+                    print("Target SE3:", target_SE3)
+
+        except Exception as e:
+            print(f"Failed to move to pose: {e}")
+            raise
+

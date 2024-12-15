@@ -1,53 +1,61 @@
-import numpy as np
-from grasp_tester import PandaGraspTester
 import time
-import os
-
+from grasp_tester import PandaGraspTester
+from utils import (
+    find_object_matches,
+    extract_object_info,
+    process_mesh,
+    load_grasp_data,
+    calculate_transformations,
+    set_object_pose,
+)
 
 def main():
-    # Define test object path
-    object_filepath = os.path.join("../models", "basket.obj")
+    # Find matches and extract information
+    matches = find_object_matches()
+    h5_path = matches[0][1]
+    object_info = extract_object_info(h5_path)
+    mesh_scale_fg = object_info["scale"]#scale from h5 file, mesh scale from the name more detailed
+    mesh_scale = float(matches[0][1].split("_")[-1].split(".h5")[-2])
 
-    mesh_scale = 0.0093761727
-    SE3 = np.array(
-        [
-            [0.1479, -0.9865, 0.0702, 0.4750],
-            [-0.9865, -0.1522, -0.0604, 0.0168],
-            [0.0702, -0.0604, -0.9957, 0.2541],
-            [0.0000, 0.0000, 0.0000, 1],
-        ]
-    )
+    # Process mesh and load grasp data
+    mesh_fname = process_mesh(h5_path, mesh_scale_fg)
+    grasp_T, success = load_grasp_data(h5_path)
 
-    # Initialize robot with test object - much larger scale
+    # Initialize robot
     robot = PandaGraspTester(
-        object_filepath=object_filepath,
-        mesh_scale=mesh_scale,  # Increased from 0.001 to 0.05
+        object_filepath=mesh_fname,
+        mesh_scale=mesh_scale,
         realtime=1,
     )
 
-    # Let simulation settle
+    # Calculate and apply transformations
+    world2ctr_T = calculate_transformations(robot, grasp_T)
+    set_object_pose(robot, world2ctr_T)
+
+    # Trimesh debugging section does not work with pybullet at the same time
+    # from acronym_tools import create_gripper_marker
+    # import trimesh
+    # mesh = trimesh.load(mesh_fname)
+    # grasp = [
+    #     create_gripper_marker(
+    #         color=[0, 255, 0], tube_radius=0.003
+    #     ).apply_transform(obj2rotgrasp_T)
+    # ]
+    # trimesh.Scene([mesh] + grasp).show()
+
+    # Run simulation
     print("Letting simulation settle...")
     for _ in range(100):
         robot.step()
         if robot.realtime:
             time.sleep(robot.stepsize)
 
-    # Get current object pose
-    obj_pos, obj_orn = robot.get_object_pose()
-    print(f"\nObject position: {obj_pos}")
-    print(f"Object orientation: {obj_orn}")
+    robot.close_gripper()
 
-    # Run grasp test
-    success = robot.test_grasp(SE3)
-    print(f"\nFinal Result: Grasp test {'succeeded' if success else 'failed'}")
-
-    # Keep simulation running
-    print("\nKeeping simulation alive for visualization...")
     while True:
         robot.step()
         if robot.realtime:
             time.sleep(robot.stepsize)
-
 
 if __name__ == "__main__":
     main()
