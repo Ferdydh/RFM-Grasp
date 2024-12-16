@@ -1,5 +1,0 @@
-data:
-  data_path: "data/"
-  grasp_files:
-    ["Basket_3071896180371f53eab2bd7322386ffd_0.009376172742964588.h5"]
-  num_samples: 1
