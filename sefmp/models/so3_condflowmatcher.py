@@ -13,7 +13,7 @@ def rotmat_to_quat(matrix):
     matrix_trace = torch.sum(matrix_diag, dim=-1, keepdim=True)
     decision = torch.cat((matrix_diag, matrix_trace), dim=-1)
     choice = torch.argmax(decision, dim=-1)
-    quat = torch.zeros((num_rots, 4), dtype=torch.float64, device=matrix.device)
+    quat = torch.zeros((num_rots, 4), dtype=matrix.dtype, device=matrix.device)
 
     # Indices where choice is not 3
     not_three_mask = choice != 3
