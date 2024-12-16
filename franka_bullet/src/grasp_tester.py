@@ -111,7 +111,7 @@ class PandaGraspTester(PandaBase):
 
             # Create the multibody with the new position
             self.test_object = p.createMultiBody(
-                baseMass=2,  # Light mass
+                baseMass=10,  # Light mass
                 baseCollisionShapeIndex=col_shape,
                 baseVisualShapeIndex=vis_shape,
                 #basePosition=self.obj_pos,
@@ -124,7 +124,7 @@ class PandaGraspTester(PandaBase):
             p.changeDynamics(
                 self.test_object,
                 -1,
-                lateralFriction=1,
+                lateralFriction=10,
                 spinningFriction=1,#0.05,
                 rollingFriction=1,#0.05,
                 restitution=0.2,
