@@ -2,10 +2,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from einops import rearrange
-from scipy.spatial.transform import Rotation
 
-
-from .util import sample_location_and_conditional_flow
 from .velocity_mlp import VelocityNetwork
 
 
@@ -46,35 +43,6 @@ class FM_SO3(nn.Module):
         Pv = x @ skew_symmetric_part
 
         return rearrange(Pv, "b c d -> b (c d)", c=3, d=3)
-
-    def loss(self, x: Tensor) -> Tensor:
-        """Compute training loss.
-
-        Args:
-            x: Target rotation matrices [batch, 3, 3]
-
-        Returns:
-            Scalar loss value
-        """
-        x1 = x
-        x0 = torch.tensor(Rotation.random(x1.size(0)).as_matrix()).to(x1.device)
-
-        # Sample random time points
-        t = torch.rand(x0.shape[0]).type_as(x0).to(x0.device)
-
-        xt, ut = sample_location_and_conditional_flow(x0, x1, t)
-
-        # Get velocity prediction
-        xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
-        vt = self.forward(xt_flat, t[:, None])
-        vt = rearrange(vt, "b (c d) -> b c d", c=3, d=3)
-
-        # Inline _loss_so3 and its dependencies
-        res = vt - ut
-        # Inline _pt_to_identity inside _norm_SO3
-        r = torch.transpose(xt, dim0=-2, dim1=-1) @ res
-        norm = -torch.diagonal(r @ r, dim1=-2, dim2=-1).sum(dim=-1) / 2
-        return torch.mean(norm, dim=-1)
 
     @torch.no_grad()
     def inference(self, xt: Tensor, t: Tensor, dt: Tensor) -> Tensor:

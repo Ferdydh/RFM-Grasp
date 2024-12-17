@@ -1,10 +1,10 @@
-from typing import Tuple, Dict
+from typing import Tuple
 import torch
 import torch.nn as nn
 from torch import Tensor
 from scipy.spatial.transform import Rotation
 
-from .fm_r3 import FM_S3
+from .fm_r3 import FM_R3
 from .fm_so3 import FM_SO3
 
 
@@ -18,7 +18,7 @@ class FM_SE3(nn.Module):
             hidden_dim: Hidden dimension for both networks (default: 64)
         """
         super().__init__()
-        self.r3fm = FM_S3(hidden_dim=hidden_dim)
+        self.r3fm = FM_R3(hidden_dim=hidden_dim)
         self.so3fm = FM_SO3(hidden_dim=hidden_dim)
 
     def forward(
@@ -37,26 +37,6 @@ class FM_SE3(nn.Module):
         so3_velocity = self.so3fm(so3_input, t)
         r3_velocity = self.r3fm(r3_input, t)
         return so3_velocity, r3_velocity
-
-    def loss(
-        self, so3_input: Tensor, r3_input: Tensor
-    ) -> Tuple[Tensor, Dict[str, Tensor]]:
-        """Compute combined loss for both manifolds.
-
-        Args:
-            so3_input: Target SO3 matrices [batch, 3, 3]
-            r3_input: Target R3 points [batch, 3]
-
-        Returns:
-            Tuple of (total_loss, loss_dict)
-        """
-        so3_loss = self.so3fm.loss(so3_input)
-        r3_loss = self.r3fm.loss(r3_input)
-        total_loss = so3_loss + r3_loss
-
-        loss_dict = {"so3_loss": so3_loss, "r3_loss": r3_loss, "total_loss": total_loss}
-
-        return total_loss, loss_dict
 
     @torch.no_grad()
     def inference_step(

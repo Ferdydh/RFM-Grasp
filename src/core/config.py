@@ -4,10 +4,6 @@ from typing import Optional, Tuple, Literal
 import torch
 
 
-def get_device() -> torch.device:
-    return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-
 # Base Configs
 @dataclass
 class BaseModelConfig:
@@ -253,7 +249,6 @@ class BaseExperimentConfig:
     logging: LoggingConfig
     checkpoint: CheckpointConfig
     early_stopping: EarlyStoppingConfig
-    device: torch.device
 
 
 @dataclass
@@ -271,7 +266,6 @@ class MLPExperimentConfig(BaseExperimentConfig):
             logging=LoggingConfig.sanity(),
             checkpoint=CheckpointConfig.default(),
             early_stopping=EarlyStoppingConfig.default(),
-            device=get_device(),
         )
 
 
@@ -292,5 +286,4 @@ class TransformerExperimentConfig(BaseExperimentConfig):
             logging=LoggingConfig.sanity(),
             checkpoint=CheckpointConfig.default(),
             early_stopping=EarlyStoppingConfig.default(),
-            device=get_device(),
         )

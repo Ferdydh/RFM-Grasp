@@ -8,7 +8,7 @@ if __name__ == "__main__":
     config.data = DataConfig.sanity()
     config.early_stopping.min_delta = 1e-5
     config.early_stopping.patience = 3
-    config.trainer.max_epochs = 10
+    config.trainer.max_epochs = 10000
     # config.data.sample_limit = 1
     # config.data.batch_size = 1
 

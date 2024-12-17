@@ -1,87 +1,132 @@
-from typing import Tuple
+import torch.nn.functional as F
+from einops import rearrange
+from scipy.spatial.transform import Rotation
+from typing import Tuple, Dict, Any
 import pytorch_lightning as pl
 import torch
 from torch import Tensor
-import trimesh
-import wandb
-
 
 from src.core.config import MLPExperimentConfig
 from src.core.visualize import check_collision
-from .fm_se3 import FM_SE3
+from src.models.util import sample_location_and_conditional_flow, scene_to_wandb_image
+from src.models.fm_se3 import FM_SE3
 from .wasserstein import wasserstein_distance
 
 
 class FlowMatching(pl.LightningModule):
+    """Flow Matching model combining SO3 and R3 manifold learning with synchronized time sampling."""
+
     def __init__(self, config: MLPExperimentConfig):
         super().__init__()
         self.config = config
         self.se3fm = FM_SE3()
+        self.sigma_min: float = 1e-4
+        self.save_hyperparameters()
 
     def compute_loss(
         self,
-        so3_inputs,
-        r3_inputs,
+        so3_inputs: Tensor,
+        r3_inputs: Tensor,
         prefix: str = "train",
-    ) -> Tuple[Tensor, dict[str, Tensor]]:
-        loss, loss_dict = self.se3fm.loss(so3_inputs, r3_inputs)
-        return loss, {f"{prefix}/{k}": v for k, v in loss_dict.items()}
+    ) -> Tuple[Tensor, Dict[str, Tensor]]:
+        """Compute combined loss for both manifolds with synchronized time sampling.
 
-    def forward(self, so3_input, r3_input, t):
+        Args:
+            so3_inputs: Target SO3 matrices [batch, 3, 3]
+            r3_inputs: Target R3 points [batch, 3]
+            prefix: Prefix for logging metrics
+
+        Returns:
+            Tuple of (total_loss, loss_dict)
+        """
+        # Sample synchronized time points for both manifolds
+        t = torch.rand(so3_inputs.shape[0], device=so3_inputs.device)
+
+        # SO3 computation
+        x0_so3 = torch.tensor(
+            Rotation.random(so3_inputs.size(0)).as_matrix(), device=so3_inputs.device
+        )
+
+        # Sample location and flow for SO3
+        xt_so3, ut_so3 = sample_location_and_conditional_flow(x0_so3, so3_inputs, t)
+
+        # Get velocity prediction for SO3
+        xt_flat = rearrange(xt_so3, "b c d -> b (c d)", c=3, d=3)
+        vt_so3 = self.se3fm.so3fm.forward(xt_flat, t[:, None])
+        vt_so3 = rearrange(vt_so3, "b (c d) -> b c d", c=3, d=3)
+
+        # Compute SO3 loss using Riemannian metric
+        r = torch.transpose(xt_so3, dim0=-2, dim1=-1) @ (vt_so3 - ut_so3)
+        norm = -torch.diagonal(r @ r, dim1=-2, dim2=-1).sum(dim=-1) / 2
+        so3_loss = torch.mean(norm, dim=-1)
+
+        # R3 computation with same time points
+        t_expanded = t.unsqueeze(-1)  # [batch, 1]
+        noise = torch.randn_like(r3_inputs)
+
+        # Compute noisy sample and optimal flow for R3
+        x_t_r3 = (
+            1 - (1 - self.sigma_min) * t_expanded
+        ) * noise + t_expanded * r3_inputs
+        optimal_flow = r3_inputs - (1 - self.sigma_min) * noise
+
+        # Get predicted flow for R3
+        predicted_flow = self.se3fm.r3fm.forward(x_t_r3, t_expanded)
+
+        # Compute R3 MSE loss
+        r3_loss = F.mse_loss(predicted_flow, optimal_flow)
+
+        total_loss = so3_loss + r3_loss
+
+        loss_dict = {
+            f"{prefix}/so3_loss": so3_loss,
+            f"{prefix}/r3_loss": r3_loss,
+            f"{prefix}/loss": total_loss,
+        }
+
+        return total_loss, loss_dict
+
+    def forward(
+        self, so3_input: Tensor, r3_input: Tensor, t: Tensor
+    ) -> Tuple[Tensor, Tensor]:
+        """Forward pass through the model."""
         return self.se3fm.forward(so3_input, r3_input, t)
 
-    def training_step(self, batch, batch_idx):
-        print("Training Step")
-
-        (
-            so3_input,
-            r3_input,
-            sdf_input,
-            mesh_path,
-            dataset_mesh_scale,
-            normalization_scale,
-        ) = batch
-
-        # self.forward(so3_input, r3_input)
-
+    def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
+        """Training step implementation."""
+        so3_input, r3_input, *_ = batch
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
-        if batch_idx % 100 == 0:
-            self.log(
-                "train/loss",
-                loss,
-                prog_bar=True,
-                batch_size=self.config.data.batch_size,
-            )
+
+        self.log_dict(
+            log_dict,
+            prog_bar=True,
+            batch_size=self.config.data.batch_size,
+            on_step=True,
+            on_epoch=True,
+        )
+
         return loss
 
-    def validation_step(self, batch, batch_idx):
-        print("Validation Step")
+    def validation_step(self, batch: Tuple, batch_idx: int) -> Dict[str, Tensor]:
+        """Validation step implementation."""
+        so3_input, r3_input, *_ = batch
 
-        (
-            so3_input,
-            r3_input,
-            sdf_input,
-            mesh_path,
-            dataset_mesh_scale,
-            normalization_scale,
-        ) = batch
+        with torch.enable_grad():
+            loss, log_dict = self.compute_loss(so3_input, r3_input, "val")
 
-        # Generate samples using combined SE3FM sampler
-        so3_generated, r3_generated = self.se3fm.sample(so3_input, r3_input)
-
-        # Simple L1 loss for validation
-        val_loss = torch.mean(torch.abs(r3_generated - r3_input)) + torch.mean(
-            torch.abs(so3_generated - so3_input)
+        # Log validation metrics
+        self.log_dict(
+            log_dict,
+            prog_bar=True,
+            batch_size=self.config.data.batch_size,
+            on_step=False,
+            on_epoch=True,
         )
 
-        self.log(
-            "val/loss", val_loss, prog_bar=True, batch_size=self.config.data.batch_size
-        )
+        return log_dict
 
-        return val_loss
-
-    def configure_optimizers(self):
-        # Configure optimizer
+    def configure_optimizers(self) -> Dict[str, Any]:
+        """Configure optimizers and learning rate schedulers."""
         optimizer = torch.optim.Adam(
             self.parameters(),
             lr=self.config.optimizer.lr,
@@ -104,91 +149,31 @@ class FlowMatching(pl.LightningModule):
             },
         }
 
-    def on_train_start(self):
-        # Log the original grasp scene
-        (
-            train_so3_input,
-            train_r3_input,
-            train_sdf_input,
-            train_mesh_path,
-            train_dataset_mesh_scale,
-            train_normalization_scale,
-        ) = self.trainer.train_dataloader.dataset[0]
+    def on_train_start(self) -> None:
+        """Setup logging of initial grasp scenes on training start."""
+        for prefix, dataset in [
+            ("train", self.trainer.train_dataloader.dataset),
+            ("val", self.trainer.val_dataloaders.dataset),
+        ]:
+            (
+                so3_input,
+                r3_input,
+                _,  # sdf_input
+                mesh_path,
+                dataset_mesh_scale,
+                normalization_scale,
+            ) = dataset[0]
 
-        (
-            val_so3_input,
-            val_r3_input,
-            val_sdf_input,
-            val_mesh_path,
-            val_dataset_mesh_scale,
-            val_normalization_scale,
-        ) = self.trainer.val_dataloaders.dataset[0]
-
-        train_has_collision, train_scene, train_min_distance = check_collision(
-            train_so3_input,
-            train_r3_input,
-            train_mesh_path,
-            train_dataset_mesh_scale,
-            train_normalization_scale,
-        )
-
-        val_has_collision, val_scene, val_min_distance = check_collision(
-            val_so3_input,
-            val_r3_input,
-            val_mesh_path,
-            val_dataset_mesh_scale,
-            val_normalization_scale,
-        )
-
-        self.logger.experiment.log(
-            {"train/original_grasp": scene_to_wandb_image(train_scene)}
-        )
-
-        self.logger.experiment.log(
-            {"val/original_grasp": scene_to_wandb_image(val_scene)}
-        )
-
-
-def scene_to_wandb_image(scene: trimesh.Scene) -> wandb.Image:
-    """
-    Log a colored front view of a trimesh scene using PyVista's off-screen rendering.
-    Returns a low-res wandb.Image for basic visualization.
-    """
-    import pyvista as pv
-    import numpy as np
-
-    # Convert trimesh scene to PyVista
-    plotter = pv.Plotter(off_screen=True)
-
-    # Add each mesh from the scene
-    for geometry in scene.geometry.values():
-        if hasattr(geometry, "vertices") and hasattr(geometry, "faces"):
-            # Convert trimesh to PyVista
-            mesh = pv.PolyData(
-                geometry.vertices,
-                np.hstack([[3] + face.tolist() for face in geometry.faces]),
+            has_collision, scene, min_distance = check_collision(
+                so3_input,
+                r3_input,
+                mesh_path,
+                dataset_mesh_scale,
+                normalization_scale,
             )
 
-            # Handle color
-            if hasattr(geometry, "visual") and hasattr(geometry.visual, "face_colors"):
-                face_colors = geometry.visual.face_colors
-                if face_colors is not None:
-                    # Convert RGBA to RGB if needed
-                    if face_colors.shape[1] == 4:
-                        face_colors = face_colors[:, :3]
-                    mesh.cell_data["colors"] = face_colors
-                    plotter.add_mesh(mesh, scalars="colors", rgb=True)
-            else:
-                # Default color if no colors specified
-                plotter.add_mesh(mesh, color="lightgray")
-
-    # Set a very low resolution
-    plotter.window_size = [1024, 1024]
-
-    # Get the image array
-    img_array = plotter.screenshot(return_img=True)
-
-    # Close the plotter
-    plotter.close()
-
-    return wandb.Image(img_array)
+            self.logger.experiment.log(
+                {
+                    f"{prefix}/original_grasp": scene_to_wandb_image(scene),
+                }
+            )
