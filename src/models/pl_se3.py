@@ -4,16 +4,12 @@ import torch
 from torch import Tensor
 import trimesh
 import wandb
-import os
 
 
 from src.core.config import MLPExperimentConfig
 from src.core.visualize import check_collision
 from .fm_se3 import FM_SE3
 from .wasserstein import wasserstein_distance
-
-# THIS IS IMPORTANT!
-os.environ["GEOMSTATS_BACKEND"] = "pytorch"
 
 
 class FlowMatching(pl.LightningModule):
