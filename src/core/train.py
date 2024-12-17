@@ -52,13 +52,6 @@ def train(
         # Log hyperparameters and config file
         wandb_logger.log_hyperparams(asdict(config))
 
-        # Initialize data handler
-        data_handler = DataHandler(config)
-
-        # Get dataloaders
-        # train_loader = data_handler.train_dataloader()
-        # val_loader = data_handler.val_dataloader()
-
         # Setup callbacks
         callbacks = []
 
@@ -101,13 +94,17 @@ def train(
             precision=config.trainer.precision,
             gradient_clip_val=config.trainer.gradient_clip_val,
             accumulate_grad_batches=config.trainer.accumulate_grad_batches,
-            #val_check_interval=1.0,
-            check_val_every_n_epoch=config.trainer.check_val_every_n_epoch,
+            val_check_interval=1.0,
+            # check_val_every_n_epoch=config.trainer.check_val_every_n_epoch,
+            check_val_every_n_epoch=1,
             log_every_n_steps=config.trainer.log_every_n_steps,
         )
 
         # Add this right before trainer.fit()
         wandb.require("service")
+
+        # Initialize data handler
+        data_handler = DataHandler(config)
 
         # Train model
         trainer.fit(model=model, datamodule=data_handler)

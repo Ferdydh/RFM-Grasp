@@ -52,9 +52,9 @@ class DataConfig:
     files: list[str]
     sampler_opt: str
     batch_size: int = 32
-    num_workers: int = 0
+    num_workers: int = 4
     sample_limit: Optional[int] = None
-    split_ratio: Tuple[int, int, int] = (80, 10, 10)
+    split_ratio: float = 0.9  # Train-Val split ratio of 90-10%
 
     @classmethod
     def sanity(cls) -> "DataConfig":
@@ -127,7 +127,7 @@ class TrainerConfig:
             precision=64,
             gradient_clip_val=1.0,
             accumulate_grad_batches=1,
-            check_val_every_n_epoch = 5,
+            check_val_every_n_epoch=5,
             log_every_n_steps=1,
         )
 
@@ -138,7 +138,7 @@ class TrainerConfig:
             precision=64,
             gradient_clip_val=1.0,
             accumulate_grad_batches=1,
-            check_val_every_n_epoch = 5,
+            check_val_every_n_epoch=5,
             log_every_n_steps=50,
         )
 

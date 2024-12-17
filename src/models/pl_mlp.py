@@ -42,6 +42,8 @@ class SE3FMModule(pl.LightningModule):
         return so3_output, r3_output
 
     def training_step(self, batch, batch_idx):  # We will add conditioning here
+        print("Training Step")
+
         (
             so3_input,
             r3_input,
@@ -54,10 +56,17 @@ class SE3FMModule(pl.LightningModule):
         # TODO: Implement log dict here
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
         if batch_idx % 100 == 0:
-            self.log("train/loss", loss, prog_bar=True)
+            self.log(
+                "train/loss",
+                loss,
+                prog_bar=True,
+                batch_size=self.config.data.batch_size,
+            )
         return loss
 
     def validation_step(self, batch, batch_idx):
+        print("Validation Step")
+
         (
             so3_input,
             r3_input,
@@ -70,7 +79,6 @@ class SE3FMModule(pl.LightningModule):
         # These generate function later only take sdf input
         # Loss here is does care about generation,
         # it is not about time t velocity estimation
-        print("popo")
         r3_generated = self.r3fm.generate(r3_input)
 
         so3_generated = self.so3fm.generate(so3_input).unsqueeze(0)
@@ -100,7 +108,9 @@ class SE3FMModule(pl.LightningModule):
             torch.abs(so3_generated - so3_input)
         )
 
-        self.log("val/loss", val_loss, prog_bar=True)
+        self.log(
+            "val/loss", val_loss, prog_bar=True, batch_size=self.config.data.batch_size
+        )
 
         return val_loss
 

@@ -3,32 +3,29 @@ import torch.nn as nn
 from torch import Tensor
 from torchdiffeq import odeint
 
-
 class R3FM(nn.Module):
-    def __init__(
-        self, input_dim: int = 3, hidden_dim: int = 64, sigma_min: float = 1e-4
-    ):
+    def __init__(self, input_dim: int = 3, hidden_dim: int = 64, sigma_min: float = 1e-4):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.sigma_min = sigma_min
-
+        
         # Velocity field network
         self.velocity_net = nn.Sequential(
             nn.Linear(input_dim + 1, hidden_dim),  # Include time t as dim+1
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, input_dim),
+            nn.Linear(hidden_dim, input_dim)
         )
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """Forward pass of the velocity field network.
-
+        
         Args:
             x (Tensor): Input tensor of shape [batch_size, input_dim]
             t (Tensor): Time tensor of shape [batch_size, 1]
-
+            
         Returns:
             Tensor: Predicted velocity field
         """
@@ -37,10 +34,10 @@ class R3FM(nn.Module):
 
     def loss(self, x: Tensor) -> Tensor:
         """Compute the loss for training.
-
+        
         Args:
             x (Tensor): Input tensor of shape [batch_size, input_dim]
-
+            
         Returns:
             Tensor: Scalar loss value
         """
@@ -50,10 +47,10 @@ class R3FM(nn.Module):
 
         # Compute noisy sample at time t
         x_t = (1 - (1 - self.sigma_min) * t) * noise + t * x
-
+        
         # Compute optimal flow
         optimal_flow = x - (1 - self.sigma_min) * noise
-
+        
         # Get predicted flow
         predicted_flow = self.forward(x_t, t)
 
@@ -62,12 +59,12 @@ class R3FM(nn.Module):
 
     def inference(self, x_0: Tensor, t: Tensor, dt: Tensor) -> Tensor:
         """Single step inference.
-
+        
         Args:
             x_0 (Tensor): Initial state tensor
             t (Tensor): Current time
             dt (Tensor): Time step size
-
+            
         Returns:
             Tensor: Next state prediction
         """
@@ -77,25 +74,20 @@ class R3FM(nn.Module):
 
     def generate(self, x_1: Tensor, steps: int = 200) -> Tensor:
         """Generate a complete trajectory.
-
+        
         Args:
             x_1 (Tensor): Target state tensor
             steps (int, optional): Number of integration steps. Defaults to 100.
-
+            
         Returns:
             Tensor: Generated final state
         """
         traj = torch.randn_like(x_1).to(x_1.device)
         t = torch.linspace(0, 1, steps).to(x_1.device)
-        dt = torch.tensor([1 / steps]).to(x_1.device)
+        dt = torch.tensor([1/steps]).to(x_1.device)
 
         for t_i in t:
-            t_i = (
-                torch.tensor([t_i])
-                .to(x_1.device)
-                .repeat(traj.size(0), 1)
-                .requires_grad_(True)
-            )
+            t_i = torch.tensor([t_i]).to(x_1.device).repeat(traj.size(0), 1).requires_grad_(True)
             traj = self.inference(traj, t_i, dt)
 
         return traj

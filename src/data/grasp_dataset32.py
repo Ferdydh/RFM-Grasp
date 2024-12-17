@@ -17,6 +17,9 @@ from pathlib import Path
 
 from src.core.config import MLPExperimentConfig, TransformerExperimentConfig
 
+# Set global default dtypes
+torch.set_default_dtype(torch.float32)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -50,7 +53,7 @@ def process_mesh_to_sdf(
     """Process a mesh to SDF with consistent scaling and centering."""
     centroid = mesh.centroid
     vertices = mesh.vertices - centroid
-    normalization_scale = np.max(np.abs(vertices))
+    normalization_scale = np.float32(np.max(np.abs(vertices)))
     vertices = vertices / normalization_scale
     faces = mesh.faces
 
@@ -58,14 +61,16 @@ def process_mesh_to_sdf(
     faces = faces.astype(np.uint32)
 
     # First compute raw SDF
-    raw_sdf = mesh2sdf.compute(vertices, faces, size)
+    raw_sdf = mesh2sdf.compute(vertices, faces, size).astype(np.float32)
     abs_sdf = np.abs(raw_sdf)
 
     # Choose a level value within the range of the absolute SDF
-    level = (abs_sdf.min() + abs_sdf.max()) / 2
+    level = np.float32((abs_sdf.min() + abs_sdf.max()) / 2)
 
     # Compute final SDF with appropriate level
-    sdf = mesh2sdf.compute(vertices, faces, size, fix=True, level=level)
+    sdf = mesh2sdf.compute(vertices, faces, size, fix=True, level=level).astype(
+        np.float32
+    )
 
     return sdf, normalization_scale
 
@@ -101,12 +106,15 @@ class SDFCache:
             return None
 
         entry = self.cache[mesh_path]
-        return entry.sdf, entry.normalization_scale
+        # Ensure cached values are float32
+        sdf = entry.sdf.astype(np.float32)
+        normalization_scale = np.float32(entry.normalization_scale)
+        return sdf, normalization_scale
 
     def put(self, mesh_path: str, sdf: np.ndarray, normalization_scale: float):
         self.cache[mesh_path] = CacheEntry(
-            sdf=sdf,
-            normalization_scale=normalization_scale,
+            sdf=sdf.astype(np.float32),
+            normalization_scale=np.float32(normalization_scale),
             timestamp=os.path.getmtime(mesh_path),
         )
         self._save_cache()
@@ -157,10 +165,10 @@ class GraspDataset(Dataset):
             # Load grasp file and get mesh information
             with h5py.File(grasp_file, "r") as h5file:
                 mesh_fname = h5file["object/file"][()].decode("utf-8")
-                dataset_mesh_scale = h5file["object/scale"][()]
+                dataset_mesh_scale = np.float32(h5file["object/scale"][()])
 
                 # Load transforms and filter successful grasps
-                transforms = h5file["grasps"]["transforms"][:]
+                transforms = h5file["grasps"]["transforms"][:].astype(np.float32)
                 grasp_success = h5file["grasps"]["qualities"]["flex"][
                     "object_in_gripper"
                 ][:]
@@ -198,8 +206,8 @@ class GraspDataset(Dataset):
                         "transform": torch.tensor(
                             scaled_transform, dtype=torch.float32
                         ),
-                        "dataset_mesh_scale": float(dataset_mesh_scale),
-                        "normalization_scale": float(normalization_scale),
+                        "dataset_mesh_scale": np.float32(dataset_mesh_scale),
+                        "normalization_scale": np.float32(normalization_scale),
                     }
                 )
 
@@ -217,7 +225,7 @@ class GraspDataset(Dataset):
 
         rotation = transform[:3, :3]
         translation = transform[:3, 3]
-        sdf = torch.tensor(self.mesh_to_sdf[mesh_path])
+        sdf = torch.tensor(self.mesh_to_sdf[mesh_path], dtype=torch.float32)
 
         return (
             rotation,
@@ -243,6 +251,10 @@ class DataHandler(pl.LightningDataModule):
         self.num_workers = config.data.num_workers
         self.num_samples = config.data.sample_limit
         self.split_ratio = config.data.split_ratio
+
+        # Important: Set num_workers=0 when using MPS
+        if torch.backends.mps.is_available():
+            self.num_workers = 0
 
         if self.split_ratio < 0.5:
             print("Warning: Split ratio is less than 0.5.")
@@ -281,8 +293,8 @@ class DataHandler(pl.LightningDataModule):
             self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
-            persistent_workers=True,
             num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
     def val_dataloader(self):
@@ -290,6 +302,6 @@ class DataHandler(pl.LightningDataModule):
             self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            persistent_workers=True,
             num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
