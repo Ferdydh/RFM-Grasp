@@ -1,23 +1,26 @@
-import io
 from typing import Tuple
-from PIL import Image as PILImage
 import pytorch_lightning as pl
 import torch
 from torch import Tensor
 import trimesh
 import wandb
+import os
+
 
 from src.core.config import MLPExperimentConfig
 from src.core.visualize import check_collision
-from .se3fm import SE3FM
+from .fm_se3 import FM_SE3
 from .wasserstein import wasserstein_distance
 
+# THIS IS IMPORTANT!
+os.environ["GEOMSTATS_BACKEND"] = "pytorch"
 
-class SE3FMModule(pl.LightningModule):
+
+class FlowMatching(pl.LightningModule):
     def __init__(self, config: MLPExperimentConfig):
         super().__init__()
         self.config = config
-        self.se3fm = SE3FM()
+        self.se3fm = FM_SE3()
 
     def compute_loss(
         self,
@@ -28,10 +31,8 @@ class SE3FMModule(pl.LightningModule):
         loss, loss_dict = self.se3fm.loss(so3_inputs, r3_inputs)
         return loss, {f"{prefix}/{k}": v for k, v in loss_dict.items()}
 
-    def forward(self, so3_input, r3_input):
-        # Note: Need time input for forward, setting to 0 as placeholder
-        t = torch.zeros(so3_input.shape[0], 1, device=so3_input.device)
-        return self.se3fm(so3_input, r3_input, t)
+    def forward(self, so3_input, r3_input, t):
+        return self.se3fm.forward(so3_input, r3_input, t)
 
     def training_step(self, batch, batch_idx):
         print("Training Step")
@@ -44,6 +45,8 @@ class SE3FMModule(pl.LightningModule):
             dataset_mesh_scale,
             normalization_scale,
         ) = batch
+
+        # self.forward(so3_input, r3_input)
 
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
         if batch_idx % 100 == 0:

@@ -1,4 +1,3 @@
-from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,12 +5,10 @@ from torch import Tensor
 from src.models.velocity_mlp import VelocityNetwork
 
 
-class R3FM(nn.Module):
+class FM_S3(nn.Module):
     """Rectified Flow Matching model."""
 
-    def __init__(
-        self, input_dim: int = 3, hidden_dim: int = 64, sigma_min: float = 1e-4
-    ):
+    def __init__(self, hidden_dim: int = 64, sigma_min: float = 1e-4):
         """
         Args:
             input_dim: Dimension of input data
@@ -19,11 +16,11 @@ class R3FM(nn.Module):
             sigma_min: Minimum noise level
         """
         super().__init__()
-        self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.sigma_min = sigma_min
 
-        self.velocity_net = VelocityNetwork(input_dim, hidden_dim)
+        # 3 for R3
+        self.velocity_net = VelocityNetwork(3, hidden_dim)
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """Compute velocity field for given points and times.
@@ -50,25 +47,17 @@ class R3FM(nn.Module):
         t = torch.rand(x.shape[0], device=x.device).unsqueeze(-1)
         noise = torch.randn_like(x).to(x.device)
 
-        # Compute noisy sample at time t
-        x_t = self._compute_noisy_sample(x, t, noise)
+        # Compute noisy sample at time t (previously _compute_noisy_sample)
+        x_t = (1 - (1 - self.sigma_min) * t) * noise + t * x
 
-        # Compute optimal flow
-        optimal_flow = self._compute_optimal_flow(x, noise)
+        # Compute optimal flow (previously _compute_optimal_flow)
+        optimal_flow = x - (1 - self.sigma_min) * noise
 
         # Get predicted flow
         predicted_flow = self.forward(x_t, t)
 
         # Compute MSE loss
         return F.mse_loss(predicted_flow, optimal_flow)
-
-    def _compute_noisy_sample(self, x: Tensor, t: Tensor, noise: Tensor) -> Tensor:
-        """Compute noisy sample at time t."""
-        return (1 - (1 - self.sigma_min) * t) * noise + t * x
-
-    def _compute_optimal_flow(self, x: Tensor, noise: Tensor) -> Tensor:
-        """Compute the optimal flow."""
-        return x - (1 - self.sigma_min) * noise
 
     @torch.no_grad()
     def inference_step(self, x: Tensor, t: Tensor, dt: Tensor) -> Tensor:

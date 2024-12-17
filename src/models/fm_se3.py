@@ -4,22 +4,22 @@ import torch.nn as nn
 from torch import Tensor
 from scipy.spatial.transform import Rotation
 
-from .r3fm import R3FM
-from .so3fm import SO3FM
+from .fm_r3 import FM_S3
+from .fm_so3 import FM_SO3
 
 
-class SE3FM(nn.Module):
+class FM_SE3(nn.Module):
     """Combined Flow Matching model for SE(3) = SO(3) x  R³."""
 
-    def __init__(self, r3_dim: int = 3, hidden_dim: int = 64):
+    def __init__(self, hidden_dim: int = 64):
         """
         Args:
             r3_dim: Dimension of R3 component (default: 3)
             hidden_dim: Hidden dimension for both networks (default: 64)
         """
         super().__init__()
-        self.r3fm = R3FM(input_dim=r3_dim, hidden_dim=hidden_dim)
-        self.so3fm = SO3FM(hidden_dim=hidden_dim)
+        self.r3fm = FM_S3(hidden_dim=hidden_dim)
+        self.so3fm = FM_SO3(hidden_dim=hidden_dim)
 
     def forward(
         self, so3_input: Tensor, r3_input: Tensor, t: Tensor
