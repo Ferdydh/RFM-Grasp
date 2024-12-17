@@ -72,7 +72,7 @@ class R3FM(nn.Module):
         x_t = x_0 + dt * dx_dt
         return x_t
 
-    def generate(self, x_1: Tensor, steps: int = 100) -> Tensor:
+    def generate(self, x_1: Tensor, steps: int = 200) -> Tensor:
         """Generate a complete trajectory.
         
         Args:
@@ -82,12 +82,12 @@ class R3FM(nn.Module):
         Returns:
             Tensor: Generated final state
         """
-        x_0 = torch.randn_like(x_1).to(x_1.device)
+        traj = torch.randn_like(x_1).to(x_1.device)
         t = torch.linspace(0, 1, steps).to(x_1.device)
+        dt = torch.tensor([1/steps]).to(x_1.device)
 
-        def ode_func(t: float, x: Tensor) -> Tensor:
-            t_batch = torch.full((x.shape[0], 1), t.item(), device=x_0.device)
-            return self.forward(x, t_batch)
+        for t_i in t:
+            t_i = torch.tensor([t_i]).to(x_1.device).repeat(traj.size(0), 1).requires_grad_(True)
+            traj = self.inference(traj, t_i, dt)
 
-        trajectory = odeint(ode_func, x_0, t, method="rk4")
-        return trajectory[-1]
+        return traj

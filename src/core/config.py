@@ -52,7 +52,7 @@ class DataConfig:
     files: list[str]
     sampler_opt: str
     batch_size: int = 32
-    num_workers: int = 4
+    num_workers: int = 0
     sample_limit: Optional[int] = None
     split_ratio: Tuple[int, int, int] = (80, 10, 10)
 
@@ -61,8 +61,8 @@ class DataConfig:
         return cls(
             data_path="data/",
             files=["Xbox360_14e5dba73b283dc7fe0939859a0b15ea_0.0005312646125977.h5"],
-            batch_size=1,
-            sample_limit=1,
+            batch_size=1028,
+            sample_limit=2,
             sampler_opt="repeat",
         )
 
@@ -117,17 +117,17 @@ class TrainerConfig:
     precision: Literal[16, 32, 64]
     gradient_clip_val: float
     accumulate_grad_batches: int
-    val_check_interval: float
+    check_val_every_n_epoch: int
     log_every_n_steps: int
 
     @classmethod
     def sanity(cls) -> "TrainerConfig":
         return cls(
             max_epochs=10,
-            precision=32,
+            precision=64,
             gradient_clip_val=1.0,
             accumulate_grad_batches=1,
-            val_check_interval=1.0,
+            check_val_every_n_epoch = 5,
             log_every_n_steps=1,
         )
 
@@ -135,10 +135,10 @@ class TrainerConfig:
     def default(cls) -> "TrainerConfig":
         return cls(
             max_epochs=100,
-            precision=32,
+            precision=64,
             gradient_clip_val=1.0,
             accumulate_grad_batches=1,
-            val_check_interval=1.0,
+            check_val_every_n_epoch = 5,
             log_every_n_steps=50,
         )
 

@@ -70,7 +70,7 @@ class SE3FMModule(pl.LightningModule):
         # These generate function later only take sdf input
         # Loss here is does care about generation,
         # it is not about time t velocity estimation
-
+        print("popo")
         r3_generated = self.r3fm.generate(r3_input)
 
         so3_generated = self.so3fm.generate(so3_input).unsqueeze(0)
