@@ -101,8 +101,6 @@ class FlowMatching(pl.LightningModule):
             log_dict,
             prog_bar=True,
             batch_size=self.config.data.batch_size,
-            on_step=True,
-            on_epoch=True,
         )
 
         return loss
@@ -119,8 +117,6 @@ class FlowMatching(pl.LightningModule):
             log_dict,
             prog_bar=True,
             batch_size=self.config.data.batch_size,
-            on_step=False,
-            on_epoch=True,
         )
 
         return log_dict
