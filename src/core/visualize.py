@@ -156,18 +156,18 @@ def check_collision(
     gripper_mesh.apply_transform(gripper_transform)
 
     # Print bounding boxes for debugging
-    print("Gripper bounds:", gripper_mesh.bounds)
-    if isinstance(object_mesh, trimesh.Scene):
-        combined_bounds = np.array(
-            [[np.inf, np.inf, np.inf], [-np.inf, -np.inf, -np.inf]]
-        )
-        for geom in object_mesh.geometry.values():
-            if isinstance(geom, trimesh.Trimesh):
-                combined_bounds[0] = np.minimum(combined_bounds[0], geom.bounds[0])
-                combined_bounds[1] = np.maximum(combined_bounds[1], geom.bounds[1])
-        print("Object bounds (combined):", combined_bounds)
-    else:
-        print("Object bounds:", object_mesh.bounds)
+    # print("Gripper bounds:", gripper_mesh.bounds)
+    # if isinstance(object_mesh, trimesh.Scene):
+    #     combined_bounds = np.array(
+    #         [[np.inf, np.inf, np.inf], [-np.inf, -np.inf, -np.inf]]
+    #     )
+    #     for geom in object_mesh.geometry.values():
+    #         if isinstance(geom, trimesh.Trimesh):
+    #             combined_bounds[0] = np.minimum(combined_bounds[0], geom.bounds[0])
+    #             combined_bounds[1] = np.maximum(combined_bounds[1], geom.bounds[1])
+    # print("Object bounds (combined):", combined_bounds)
+    # else:
+    # print("Object bounds:", object_mesh.bounds)
 
     # Check collision
     has_collision, min_distance = _check_mesh_collision(gripper_mesh, object_mesh)

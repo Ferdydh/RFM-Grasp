@@ -1,45 +1,68 @@
 import torch
 import torch.nn as nn
+from torch import Tensor
 from einops import rearrange
 from geomstats.geometry.special_orthogonal import SpecialOrthogonal
 from .so3_condflowmatcher import SO3ConditionalFlowMatcher
 from scipy.spatial.transform import Rotation
-from torch import Tensor
+from .velocity_mlp import VelocityNetwork
 
 
 class SO3FM(nn.Module):
+    """Flow Matching model for SO(3) manifold."""
+
     def __init__(self, hidden_dim: int = 64):
+        """
+        Args:
+            hidden_dim: Hidden dimension of the velocity network
+        """
         super().__init__()
         self.so3_group = SpecialOrthogonal(n=3, point_type="matrix")
         self.so3_cfm = SO3ConditionalFlowMatcher(manifold=self.so3_group)
         self.hidden_dim = hidden_dim
 
-        # Neural network for the velocity field
-        # We can import the model instead of defining later if wanted
-        self.velocity_net = nn.Sequential(
-            nn.Linear(9 + 1, hidden_dim),  # 9 for flattened 3x3 matrix + 1 for time
-            nn.SELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SELU(),
-            nn.Linear(hidden_dim, 9),  # Output is a flattened 3x3 matrix
+        # Use shared VelocityNetwork with SELU activation for SO3
+        self.velocity_net = VelocityNetwork(
+            input_dim=9,  # Flattened 3x3 matrix
+            hidden_dim=hidden_dim,
+            activation=nn.SELU,
         )
 
-    def forward(self, input_data: Tensor) -> Tensor:
-        """Forward pass through the velocity network.
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        """Forward pass to compute velocity field.
 
         Args:
-            input_data (Tensor): Concatenated state and time [batch, 10]
+            x: Input state [batch, 9]
+            t: Time [batch, 1]
 
         Returns:
-            Tensor: Velocity prediction in tangent space
+            Velocity prediction in tangent space [batch, 9]
         """
-        v = self.velocity_net(input_data)
-        x = rearrange(input_data[:, :-1], "b (c d) -> b c d", c=3, d=3)
+        v = self.velocity_net(x, t)
+        x = rearrange(x, "b (c d) -> b c d", c=3, d=3)
         v = rearrange(v, "b (c d) -> b c d", c=3, d=3)
         Pv = self._tangent_space_proj(x, v)
         return rearrange(Pv, "b c d -> b (c d)", c=3, d=3)
+
+    def loss(self, x: Tensor) -> Tensor:
+        """Compute training loss.
+
+        Args:
+            x: Target rotation matrices [batch, 3, 3]
+
+        Returns:
+            Scalar loss value
+        """
+        x1 = x
+        x0 = torch.tensor(Rotation.random(x1.size(0)).as_matrix()).to(x1.device)
+        t, xt, ut = self.so3_cfm.sample_location_and_conditional_flow_simple(x0, x1)
+
+        # Get velocity prediction
+        xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
+        vt = self.forward(xt_flat, t[:, None])
+        vt = rearrange(vt, "b (c d) -> b c d", c=3, d=3)
+
+        return self._loss_so3(vt, ut, xt)
 
     def _exp(self, A: Tensor) -> Tensor:
         """Matrix exponential."""
@@ -70,36 +93,19 @@ class SO3FM(nn.Module):
         norm = self._norm_SO3(x, res)
         return torch.mean(norm, dim=-1)
 
-    def loss(self, x: Tensor) -> Tensor:
-        """Compute training loss.
+    def _compute_flow(self, t: Tensor, xt: Tensor) -> Tensor:
+        """Compute conditional flow.
 
         Args:
-            x (Tensor): Target rotation matrices [batch, 3, 3]
+            t: Time tensor
+            xt: State tensor [batch, 9]
 
         Returns:
-            Tensor: Scalar loss value
+            Flow field [batch, 3, 3]
         """
-        x1 = x  # .double()
-        x0 = torch.tensor(Rotation.random(x1.size(0)).as_matrix()).to(x1.device)
-        # TODO: check the difference between _simple and the OT version later
-        # so3 group is a matrix manifold and in the flowmatcher we have
-        # additional vector manifold for the tangent space
-        t, xt, ut = self.so3_cfm.sample_location_and_conditional_flow_simple(x0, x1)
-        # t, xt, ut = self._sample_location_and_flow(x0, x1)
-
-        # Get velocity prediction
-        vt = self.forward(
-            torch.cat([rearrange(xt, "b c d -> b (c d)", c=3, d=3), t[:, None]], dim=-1)
-        )
-        vt = rearrange(vt, "b (c d) -> b c d", c=3, d=3)
-
-        return self._loss_so3(vt, ut, xt)
-
-    def _compute_flow(self, t: Tensor, xt: Tensor) -> Tensor:
-        """Compute conditional flow."""
         xt = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
 
-        def index_time_der(i):
+        def index_time_der(i: Tensor) -> Tensor:
             return torch.autograd.grad(xt, t, i, create_graph=True, retain_graph=True)[
                 0
             ]
@@ -109,65 +115,34 @@ class SO3FM(nn.Module):
         )
         return rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
 
-    # We are not using this function, yet we can use it later with small modifications
-    # def _sample_location_and_flow(self, x0: Tensor, x1: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-    #     """Sample location and compute conditional flow."""
-    #     t = torch.rand(x0.shape[0]).type_as(x0).to(x0.device)
-    #     t.requires_grad = True
-
-    #     # Get rotation vector representations
-    #     rot_x0 = self._rotmat_to_rotvec(x0)
-    #     rot_x1 = self._rotmat_to_rotvec(x1)
-
-    #     # Compute log map
-    #     #Okey maybe log wouldnt work but it is working rn it does the same thing
-    #     # but if doesnt we can use the commented
-    #     log_x1 = self.so3_group.log_not_from_identity(rot_x1, rot_x0)
-    #     #log_x1 = self.so3_group.log(rot_x1, rot_x0)
-
-    #     # Sample along geodesic
-    #     xt = self.so3_group.exp_not_from_identity(t.reshape(-1, 1) * log_x1, rot_x0)
-    #     #xt = self.so3_group.exp(t.reshape(-1, 1) * log_x1, rot_x0)
-    #     xt = self.so3_group.matrix_from_rotation_vector(xt)
-
-    #     # Compute flow
-    #     ut = self._compute_flow(t, xt)
-
-    #     return t, xt, ut
-
-    # def _rotmat_to_rotvec(self, matrix: Tensor) -> Tensor:
-    #     """Convert rotation matrix to rotation vector."""
-    #     # This is a simplified version - you might want to implement a more robust conversion
-    #     rotation = Rotation.from_matrix(matrix.cpu().numpy())
-    #     return torch.tensor(rotation.as_rotvec(), device=matrix.device)
-
+    @torch.no_grad()
     def inference(self, xt: Tensor, t: Tensor, dt: Tensor) -> Tensor:
         """Single step inference.
 
         Args:
-            xt (Tensor): Current state
-            t (Tensor): Current time
-            dt (Tensor): Time step
+            xt: Current state [batch, 9]
+            t: Current time [batch]
+            dt: Time step size [1]
 
         Returns:
-            Tensor: Next state prediction
+            Next state prediction [batch, 9]
         """
-        with torch.no_grad():
-            vt = self.forward(torch.cat([xt, t[:, None]], dim=-1))
-            vt = rearrange(vt, "b (c d) -> b c d", c=3, d=3)
-            xt = rearrange(xt, "b (c d) -> b c d", c=3, d=3)
-            xt_new = self._expmap(xt, vt * dt)
+        vt = self.forward(xt, t[:, None])
+        vt = rearrange(vt, "b (c d) -> b c d", c=3, d=3)
+        xt = rearrange(xt, "b (c d) -> b c d", c=3, d=3)
+        xt_new = self._expmap(xt, vt * dt)
         return rearrange(xt_new, "b c d -> b (c d)", c=3, d=3)
 
+    @torch.no_grad()
     def generate(self, x: Tensor, steps: int = 100) -> Tensor:
         """Generate complete trajectory.
 
         Args:
-            x (Tensor): Target state tensor
-            steps (int, optional): Number of steps. Defaults to 100.
+            x: Target state tensor [batch, 3, 3]
+            steps: Number of integration steps
 
         Returns:
-            Tensor: Generated final state
+            Generated final state [3, 3]
         """
         n_test = x.shape[0]
         traj = torch.tensor(

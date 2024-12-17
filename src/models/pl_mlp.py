@@ -1,10 +1,14 @@
+import io
 from typing import Tuple
-
+from PIL import Image as PILImage
 import pytorch_lightning as pl
 import torch
 from torch import Tensor
+import trimesh
+import wandb
 
 from src.core.config import MLPExperimentConfig
+from src.core.visualize import check_collision
 
 from .r3fm import R3FM
 from .so3fm import SO3FM
@@ -79,12 +83,12 @@ class SE3FMModule(pl.LightningModule):
         # These generate function later only take sdf input
         # Loss here is does care about generation,
         # it is not about time t velocity estimation
-        r3_generated = self.r3fm.generate(r3_input)
+        r3_generated = self.r3fm.sample(r3_input)
 
         so3_generated = self.so3fm.generate(so3_input).unsqueeze(0)
 
-        print("R3 Ground Truth:", r3_input, "\nR3 Generated:", r3_generated)
-        print("SO3 Input:", so3_input, "\nSO3 Generated:", so3_generated)
+        # print("R3 Ground Truth:", r3_input, "\nR3 Generated:", r3_generated)
+        # print("SO3 Input:", so3_input, "\nSO3 Generated:", so3_generated)
 
         # Calculate Wasserstein distance the calculation
         # at the top won't be used if we use this
@@ -137,3 +141,92 @@ class SE3FMModule(pl.LightningModule):
                 "monitor": self.config.checkpoint.monitor,
             },
         }
+
+    def on_train_start(self):
+        # Log the original grasp scene
+        (
+            train_so3_input,
+            train_r3_input,
+            train_sdf_input,
+            train_mesh_path,
+            train_dataset_mesh_scale,
+            train_normalization_scale,
+        ) = self.trainer.train_dataloader.dataset[0]
+
+        (
+            val_so3_input,
+            val_r3_input,
+            val_sdf_input,
+            val_mesh_path,
+            val_dataset_mesh_scale,
+            val_normalization_scale,
+        ) = self.trainer.val_dataloaders.dataset[0]
+
+        train_has_collision, train_scene, train_min_distance = check_collision(
+            train_so3_input,
+            train_r3_input,
+            train_mesh_path,
+            train_dataset_mesh_scale,
+            train_normalization_scale,
+        )
+
+        val_has_collision, val_scene, val_min_distance = check_collision(
+            val_so3_input,
+            val_r3_input,
+            val_mesh_path,
+            val_dataset_mesh_scale,
+            val_normalization_scale,
+        )
+
+        self.logger.experiment.log(
+            {"train/original_grasp": scene_to_wandb_image(train_scene)}
+        )
+
+        self.logger.experiment.log(
+            {"val/original_grasp": scene_to_wandb_image(val_scene)}
+        )
+
+
+def scene_to_wandb_image(scene: trimesh.Scene) -> wandb.Image:
+    """
+    Log a colored front view of a trimesh scene using PyVista's off-screen rendering.
+    Returns a low-res wandb.Image for basic visualization.
+    """
+    import pyvista as pv
+    import numpy as np
+
+    # Convert trimesh scene to PyVista
+    plotter = pv.Plotter(off_screen=True)
+
+    # Add each mesh from the scene
+    for geometry in scene.geometry.values():
+        if hasattr(geometry, "vertices") and hasattr(geometry, "faces"):
+            # Convert trimesh to PyVista
+            mesh = pv.PolyData(
+                geometry.vertices,
+                np.hstack([[3] + face.tolist() for face in geometry.faces]),
+            )
+
+            # Handle color
+            if hasattr(geometry, "visual") and hasattr(geometry.visual, "face_colors"):
+                face_colors = geometry.visual.face_colors
+                if face_colors is not None:
+                    # Convert RGBA to RGB if needed
+                    if face_colors.shape[1] == 4:
+                        face_colors = face_colors[:, :3]
+                    mesh.cell_data["colors"] = face_colors
+                    plotter.add_mesh(mesh, scalars="colors", rgb=True)
+            else:
+                # Default color if no colors specified
+                plotter.add_mesh(mesh, color="lightgray")
+
+    # # Set a very low resolution
+    plotter.window_size = [1024, 1024]
+
+    # Get the image array
+    img_array = plotter.screenshot(return_img=True)
+
+    # Close the plotter
+    plotter.close()
+
+    return wandb.Image(img_array)

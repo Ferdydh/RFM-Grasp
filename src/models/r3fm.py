@@ -1,89 +1,100 @@
+from typing import Tuple
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
-from torchdiffeq import odeint
+from src.models.velocity_mlp import VelocityNetwork
 
 
 class R3FM(nn.Module):
+    """Rectified Flow Matching model."""
+
     def __init__(
         self, input_dim: int = 3, hidden_dim: int = 64, sigma_min: float = 1e-4
     ):
+        """
+        Args:
+            input_dim: Dimension of input data
+            hidden_dim: Hidden dimension of the velocity network
+            sigma_min: Minimum noise level
+        """
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.sigma_min = sigma_min
 
-        # Velocity field network
-        self.velocity_net = nn.Sequential(
-            nn.Linear(input_dim + 1, hidden_dim),  # Include time t as dim+1
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, input_dim),
-        )
+        self.velocity_net = VelocityNetwork(input_dim, hidden_dim)
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
-        """Forward pass of the velocity field network.
+        """Compute velocity field for given points and times.
 
         Args:
-            x (Tensor): Input tensor of shape [batch_size, input_dim]
-            t (Tensor): Time tensor of shape [batch_size, 1]
+            x: Input tensor of shape [batch_size, input_dim]
+            t: Time tensor of shape [batch_size, 1]
 
         Returns:
-            Tensor: Predicted velocity field
+            Predicted velocity field of shape [batch_size, input_dim]
         """
-        input_data = torch.cat([x, t], dim=1)
-        return self.velocity_net(input_data)
+        return self.velocity_net(x, t)
 
     def loss(self, x: Tensor) -> Tensor:
-        """Compute the loss for training.
+        """Compute the Flow Matching loss.
 
         Args:
-            x (Tensor): Input tensor of shape [batch_size, input_dim]
+            x: Input tensor of shape [batch_size, input_dim]
 
         Returns:
-            Tensor: Scalar loss value
+            Scalar loss value
         """
-        # Sample random time steps
+        # Sample random time steps and noise
         t = torch.rand(x.shape[0], device=x.device).unsqueeze(-1)
         noise = torch.randn_like(x).to(x.device)
 
         # Compute noisy sample at time t
-        x_t = (1 - (1 - self.sigma_min) * t) * noise + t * x
+        x_t = self._compute_noisy_sample(x, t, noise)
 
         # Compute optimal flow
-        optimal_flow = x - (1 - self.sigma_min) * noise
+        optimal_flow = self._compute_optimal_flow(x, noise)
 
         # Get predicted flow
         predicted_flow = self.forward(x_t, t)
 
         # Compute MSE loss
-        return (predicted_flow - optimal_flow).square().mean()
+        return F.mse_loss(predicted_flow, optimal_flow)
 
-    def inference(self, x_0: Tensor, t: Tensor, dt: Tensor) -> Tensor:
-        """Single step inference.
+    def _compute_noisy_sample(self, x: Tensor, t: Tensor, noise: Tensor) -> Tensor:
+        """Compute noisy sample at time t."""
+        return (1 - (1 - self.sigma_min) * t) * noise + t * x
+
+    def _compute_optimal_flow(self, x: Tensor, noise: Tensor) -> Tensor:
+        """Compute the optimal flow."""
+        return x - (1 - self.sigma_min) * noise
+
+    @torch.no_grad()
+    def inference_step(self, x: Tensor, t: Tensor, dt: Tensor) -> Tensor:
+        """Perform a single inference step.
 
         Args:
-            x_0 (Tensor): Initial state tensor
-            t (Tensor): Current time
-            dt (Tensor): Time step size
+            x: Current state tensor of shape [batch_size, input_dim]
+            t: Current time tensor of shape [batch_size, 1]
+            dt: Time step size tensor
 
         Returns:
-            Tensor: Next state prediction
+            Next state prediction
         """
-        dx_dt = self.forward(x_0, t)
-        x_t = x_0 + dt * dx_dt
-        return x_t
+        dx_dt = self.forward(x, t)
+        return x + dt * dx_dt
 
-    def generate(self, x_1: Tensor, steps: int = 200) -> Tensor:
-        """Generate a complete trajectory.
+    @torch.no_grad()
+    def sample(self, x_1: Tensor, steps: int = 200) -> Tensor:
+        """Generate samples using the learned flow.
 
         Args:
-            x_1 (Tensor): Target state tensor
-            steps (int, optional): Number of integration steps. Defaults to 100.
+            x_1: Target state tensor of shape [batch_size, input_dim]
+            steps: Number of integration steps
 
         Returns:
-            Tensor: Generated final state
+            Generated samples of shape [batch_size, input_dim]
         """
         traj = torch.randn_like(x_1).to(x_1.device)
         t = torch.linspace(0, 1, steps).to(x_1.device)
@@ -96,6 +107,6 @@ class R3FM(nn.Module):
                 .repeat(traj.size(0), 1)
                 .requires_grad_(True)
             )
-            traj = self.inference(traj, t_i, dt)
+            traj = self.inference_step(traj, t_i, dt)
 
         return traj
