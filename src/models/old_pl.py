@@ -9,15 +9,25 @@ import wandb
 
 from src.core.config import MLPExperimentConfig
 from src.core.visualize import check_collision
-from .se3fm import SE3FM
+
+from .r3fm import R3FM
+from .so3fm import SO3FM
+
 from .wasserstein import wasserstein_distance
 
 
 class SE3FMModule(pl.LightningModule):
     def __init__(self, config: MLPExperimentConfig):
         super().__init__()
+        # There are some loss issues related to quaternions
+        # that we need to solve for float32
+
+        # torch.set_float32_matmul_precision("medium")
+        # torch.set_default_dtype(torch.float32)
         self.config = config
-        self.se3fm = SE3FM()
+
+        self.so3fm = SO3FM()
+        self.r3fm = R3FM()
 
     def compute_loss(
         self,
@@ -25,15 +35,17 @@ class SE3FMModule(pl.LightningModule):
         r3_inputs,
         prefix: str = "train",
     ) -> Tuple[Tensor, dict[str, Tensor]]:
-        loss, loss_dict = self.se3fm.loss(so3_inputs, r3_inputs)
-        return loss, {f"{prefix}/{k}": v for k, v in loss_dict.items()}
+        so3_loss = self.so3fm.loss(so3_inputs)
+        r3_loss = self.r3fm.loss(r3_inputs)
+        loss = so3_loss + r3_loss
+        return loss, {f"{prefix}/so3loss": loss}
 
     def forward(self, so3_input, r3_input):
-        # Note: Need time input for forward, setting to 0 as placeholder
-        t = torch.zeros(so3_input.shape[0], 1, device=so3_input.device)
-        return self.se3fm(so3_input, r3_input, t)
+        so3_output = self.so3fm.forward(so3_input)
+        r3_output = self.r3fm.forward(r3_input)
+        return so3_output, r3_output
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx):  # We will add conditioning here
         print("Training Step")
 
         (
@@ -45,6 +57,7 @@ class SE3FMModule(pl.LightningModule):
             normalization_scale,
         ) = batch
 
+        # TODO: Implement log dict here
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
         if batch_idx % 100 == 0:
             self.log(
@@ -67,10 +80,34 @@ class SE3FMModule(pl.LightningModule):
             normalization_scale,
         ) = batch
 
-        # Generate samples using combined SE3FM sampler
-        so3_generated, r3_generated = self.se3fm.sample(so3_input, r3_input)
+        # These generate function later only take sdf input
+        # Loss here is does care about generation,
+        # it is not about time t velocity estimation
+        r3_generated = self.r3fm.sample(r3_input)
 
-        # Simple L1 loss for validation
+        so3_generated = self.so3fm.generate(so3_input).unsqueeze(0)
+
+        # print("R3 Ground Truth:", r3_input, "\nR3 Generated:", r3_generated)
+        # print("SO3 Input:", so3_input, "\nSO3 Generated:", so3_generated)
+
+        # Calculate Wasserstein distance the calculation
+        # at the top won't be used if we use this
+
+        # r3_wasserstein = wasserstein_distance(
+        #     r3_generated, r3_input, space="r3", method="exact", power=2
+        # )
+        # so3_wasserstein = wasserstein_distance(
+        #     so3_generated, so3_input, space="so3", method="exact", power=2
+        # )
+
+        ## Calculate total validation loss
+        # val_loss = r3_wasserstein + so3_wasserstein
+
+        ## Log metrics with val/ prefix
+        # self.log('val/loss', val_loss, prog_bar=True)
+        # self.log('val/r3_wasserstein', r3_wasserstein)
+        # self.log('val/so3_wasserstein', so3_wasserstein)
+
         val_loss = torch.mean(torch.abs(r3_generated - r3_input)) + torch.mean(
             torch.abs(so3_generated - so3_input)
         )
@@ -183,7 +220,7 @@ def scene_to_wandb_image(scene: trimesh.Scene) -> wandb.Image:
                 # Default color if no colors specified
                 plotter.add_mesh(mesh, color="lightgray")
 
-    # Set a very low resolution
+    # # Set a very low resolution
     plotter.window_size = [1024, 1024]
 
     # Get the image array

@@ -132,27 +132,3 @@ class SO3FM(nn.Module):
         xt = rearrange(xt, "b (c d) -> b c d", c=3, d=3)
         xt_new = self._expmap(xt, vt * dt)
         return rearrange(xt_new, "b c d -> b (c d)", c=3, d=3)
-
-    @torch.no_grad()
-    def generate(self, x: Tensor, steps: int = 100) -> Tensor:
-        """Generate complete trajectory.
-
-        Args:
-            x: Target state tensor [batch, 3, 3]
-            steps: Number of integration steps
-
-        Returns:
-            Generated final state [3, 3]
-        """
-        n_test = x.shape[0]
-        traj = torch.tensor(
-            Rotation.random(n_test).as_matrix(), dtype=torch.float64
-        ).reshape(-1, 9)
-
-        for t in torch.linspace(0, 1, steps):
-            t = torch.tensor([t], dtype=torch.float64).repeat(n_test)
-            dt = torch.tensor([1 / steps])
-            traj = self.inference(traj, t, dt)
-
-        final_traj = rearrange(traj, "b (c d) -> b c d", c=3, d=3)
-        return final_traj[-1]

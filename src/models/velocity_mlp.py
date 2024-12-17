@@ -32,4 +32,14 @@ class VelocityNetwork(nn.Module):
         Returns:
             Predicted velocity of shape [batch_size, input_dim]
         """
+        # Ensure x is 2D [batch, dim]
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+
+        # Ensure t is 2D [batch, 1]
+        if t.dim() == 1:
+            t = t.unsqueeze(-1)
+        elif t.dim() == 3:
+            t = t.squeeze(1)  # Remove middle dimension if [batch, 1, 1]
+
         return self.net(torch.cat([x, t], dim=1))

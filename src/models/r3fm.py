@@ -84,29 +84,3 @@ class R3FM(nn.Module):
         """
         dx_dt = self.forward(x, t)
         return x + dt * dx_dt
-
-    @torch.no_grad()
-    def sample(self, x_1: Tensor, steps: int = 200) -> Tensor:
-        """Generate samples using the learned flow.
-
-        Args:
-            x_1: Target state tensor of shape [batch_size, input_dim]
-            steps: Number of integration steps
-
-        Returns:
-            Generated samples of shape [batch_size, input_dim]
-        """
-        traj = torch.randn_like(x_1).to(x_1.device)
-        t = torch.linspace(0, 1, steps).to(x_1.device)
-        dt = torch.tensor([1 / steps]).to(x_1.device)
-
-        for t_i in t:
-            t_i = (
-                torch.tensor([t_i])
-                .to(x_1.device)
-                .repeat(traj.size(0), 1)
-                .requires_grad_(True)
-            )
-            traj = self.inference_step(traj, t_i, dt)
-
-        return traj
