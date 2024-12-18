@@ -4,29 +4,28 @@
 
 ```
 .
-├── data/          # Dataset directory
-├── src/                 # Main source code
-│   ├── core/           # Core functionality
-│   ├── data/           # Data handling
-│   └── models/         # Model implementations
-├── scripts/            # Execution scripts
-│   ├── show_grasp.py      # Data visualization
-│   ├── sanity_mlp.py  # MLP model testing
-│   └── sanity_transformer.py  # Transformer testing
-└── environment.yaml    # Conda environment file
+├── data/
+├── src/
+│   ├── core/
+│   ├── data/
+│   └── models/
+├── scripts/            # Scripts here
+│   ├── show_grasp.py
+│   ├── sanity_mlp.py
+│   └── sanity_transformer.py
+└── pyproject.toml
 ```
 
 ## Getting Started
 
 1. Place your dataset in the `data` directory at the project root
-2. Create and activate conda environment:
+2. Use uv to install :
    ```bash
-   conda env create -f environment.yaml
-   conda activate adlr
+   uv venv
+   uv pip install -e .
    ```
 
-Save with this
-conda env export --no-builds > environment.yaml
+Save with this`uv add your_package`
 
 ## Dataset Information
 
@@ -54,9 +53,8 @@ The configuration system (defined in `src/core/config.py`) is a crucial componen
 
 The default dataset split ratio is:
 
-- Training: 80%
+- Training: 90%
 - Validation: 10%
-- Test: 10%
 
 ### Quick Start Configuration
 

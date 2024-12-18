@@ -1,10 +1,12 @@
-ckpt
-/data
-*.zip
+# Project structure related
+logs
+data
+
+# Python
 __pycache__
 *.pyc
-.vscode
-lightning_logs
-wandb
-checkpoints
 .DS_Store
+.venv
+
+# vscode
+.vscode

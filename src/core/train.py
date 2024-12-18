@@ -35,11 +35,6 @@ def train(
     atexit.register(cleanup_wandb)
 
     try:
-        # Load configuration
-        # Setup unique run name if not specified
-        if config.logging.run_name is None:
-            config.logging.run_name = f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
         # Initialize WandB logger with modified settings
         wandb_logger = WandbLogger(
             project=config.logging.project_name,
@@ -57,7 +52,7 @@ def train(
 
         # Checkpoint callback
         checkpoint_callback = ModelCheckpoint(
-            dirpath=config.checkpoint.dirpath,
+            dirpath=config.checkpoint.dirpath + "/" + config.logging.run_name,
             filename=config.checkpoint.filename,
             monitor=config.checkpoint.monitor,
             mode=config.checkpoint.mode,

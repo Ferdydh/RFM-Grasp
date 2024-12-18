@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional, Tuple, Literal
 
 import torch
@@ -158,6 +159,7 @@ class LoggingConfig:
             num_samples_to_visualize=1,
             sample_every_n_epochs=1,
             log_every_n_steps=1,
+            run_name=f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         )
 
     @classmethod
@@ -168,6 +170,7 @@ class LoggingConfig:
             num_samples_to_visualize=3,
             sample_every_n_epochs=50,
             log_every_n_steps=50,
+            run_name=f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         )
 
 
@@ -183,7 +186,7 @@ class CheckpointConfig:
     @classmethod
     def default(cls) -> "CheckpointConfig":
         return cls(
-            dirpath="checkpoints",
+            dirpath="logs/checkpoints",
             filename="fm-{epoch:02d}-{val_loss:.2f}",
             monitor="val/loss",
             mode="min",

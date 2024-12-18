@@ -8,7 +8,8 @@ if __name__ == "__main__":
     # config.data = DataConfig.sanity()
     config.early_stopping.min_delta = 1e-5
     config.early_stopping.patience = 5000
-    config.trainer.max_epochs = 10000
+    # config.trainer.max_epochs = 10000
+    config.trainer.max_epochs = 10
 
     # Initialize model
     model = pl_se3.FlowMatching(config)
