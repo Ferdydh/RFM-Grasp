@@ -88,8 +88,8 @@ def _check_mesh_collision(
     object_points = _get_mesh_points(object_mesh)
 
     # Print point clouds size for debugging
-    print(f"Number of gripper points: {len(gripper_points)}")
-    print(f"Number of object points: {len(object_points)}")
+    # print(f"Number of gripper points: {len(gripper_points)}")
+    # print(f"Number of object points: {len(object_points)}")
 
     # Discretize points to voxels
     gripper_voxels = np.round(gripper_points / voxel_size) * voxel_size
@@ -120,7 +120,7 @@ def _check_mesh_collision(
     distances_o2g, _ = object_tree.query(gripper_voxels, k=1)
 
     min_distance = min(np.min(distances_g2o), np.min(distances_o2g))
-    print(f"Minimum distance between point clouds: {min_distance}")
+    # print(f"Minimum distance between point clouds: {min_distance}")
 
     # Check for overlapping points (considering discretization)
     collision_threshold = voxel_size * 1.5

@@ -71,15 +71,15 @@ def train(
         callbacks.append(lr_monitor)
 
         # Early stopping callback
-        # early_stopping = EarlyStopping(
-        #     monitor=config.early_stopping.monitor,
-        #     min_delta=config.early_stopping.min_delta,
-        #     patience=config.early_stopping.patience,
-        #     verbose=True,
-        #     mode=config.early_stopping.mode,
-        #     check_finite=True,  # Stop if loss becomes NaN or inf
-        # )
-        # callbacks.append(early_stopping)
+        early_stopping = EarlyStopping(
+            monitor=config.early_stopping.monitor,
+            min_delta=config.early_stopping.min_delta,
+            patience=config.early_stopping.patience,
+            verbose=True,
+            mode=config.early_stopping.mode,
+            check_finite=True,  # Stop if loss becomes NaN or inf
+        )
+        callbacks.append(early_stopping)
 
         # Initialize trainer
         trainer = pl.Trainer(

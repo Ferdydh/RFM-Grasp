@@ -14,13 +14,39 @@ class VelocityNetwork(nn.Module):
             activation: Activation function to use (default: SiLU/Swish)
         """
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim + 1, hidden_dim),  # +1 for time dimension
+        # Time embedding
+        self.time_proj = nn.Sequential(
+            nn.Linear(1, hidden_dim), activation(), nn.LayerNorm(hidden_dim)
+        )
+
+        # Main network with residual blocks
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+
+        self.block1 = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
             activation(),
             nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             activation(),
-            nn.Linear(hidden_dim, input_dim),
+            nn.Linear(hidden_dim, hidden_dim),
         )
+
+        self.block2 = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            activation(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            activation(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+        # Output projection with small initialization
+        self.final = nn.Linear(hidden_dim, input_dim)
+        # Initialize final layer with small weights for stability
+        nn.init.zeros_(self.final.weight)
+        nn.init.zeros_(self.final.bias)
+
+        self.scale = nn.Parameter(torch.ones(1) * 0.1)
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """Forward pass through the velocity network.
@@ -42,4 +68,15 @@ class VelocityNetwork(nn.Module):
         elif t.dim() == 3:
             t = t.squeeze(1)  # Remove middle dimension if [batch, 1, 1]
 
-        return self.net(torch.cat([x, t], dim=1))
+        t_emb = self.time_proj(t)
+
+        # Project input and add time embedding
+        h = self.input_proj(x)
+        h = h + t_emb
+
+        # Residual blocks
+        h = h + self.block1(h)
+        h = h + self.block2(h)
+
+        # Scaled output
+        return self.final(h) * self.scale

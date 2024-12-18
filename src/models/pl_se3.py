@@ -173,3 +173,29 @@ class FlowMatching(pl.LightningModule):
                     f"{prefix}/original_grasp": scene_to_wandb_image(scene),
                 }
             )
+
+    def on_train_end(self):
+        (
+            so3_input,
+            r3_input,
+            _,  # sdf_input
+            mesh_path,
+            dataset_mesh_scale,
+            normalization_scale,
+        ) = self.trainer.train_dataloader.dataset[0]
+
+        so3_output, r3_output = self.se3fm.sample(so3_input, r3_input)
+
+        has_collision, scene, min_distance = check_collision(
+            so3_output,
+            r3_output,
+            mesh_path,
+            dataset_mesh_scale,
+            normalization_scale,
+        )
+
+        self.logger.experiment.log(
+            {
+                "final_grasp": scene_to_wandb_image(scene),
+            }
+        )

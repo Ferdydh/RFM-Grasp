@@ -57,8 +57,8 @@ class DataConfig:
         return cls(
             data_path="data/",
             files=["Xbox360_14e5dba73b283dc7fe0939859a0b15ea_0.0005312646125977.h5"],
-            batch_size=1028,
-            sample_limit=2,
+            batch_size=8,
+            sample_limit=1,
             sampler_opt="repeat",
         )
 
@@ -69,6 +69,7 @@ class DataConfig:
             files=["Xbox360_14e5dba73b283dc7fe0939859a0b15ea_0.0005312646125977.h5"],
             batch_size=8,
             sample_limit=10,
+            split_ratio=0.8,
             sampler_opt="repeat",
         )
 
