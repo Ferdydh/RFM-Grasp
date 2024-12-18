@@ -186,16 +186,30 @@ class FlowMatching(pl.LightningModule):
 
         so3_output, r3_output = self.se3fm.sample(so3_input, r3_input)
 
-        has_collision, scene, min_distance = check_collision(
-            so3_output,
-            r3_output,
-            mesh_path,
-            dataset_mesh_scale,
-            normalization_scale,
-        )
+        batch_size = so3_output.shape[0]  # Assuming first dimension is batch size
 
-        self.logger.experiment.log(
-            {
-                "final_grasp": scene_to_wandb_image(scene),
-            }
-        )
+        for batch_idx in range(batch_size):
+            # Extract single sample from batch
+            so3_sample = so3_output[batch_idx]  # Shape: (dim,)
+            r3_sample = r3_output[batch_idx]  # Shape: (dim,)
+
+            # Check collision for this sample
+            has_collision, scene, min_distance = check_collision(
+                so3_sample,
+                r3_sample,
+                mesh_path,
+                dataset_mesh_scale,
+                normalization_scale,
+            )
+
+            gripper_transform = torch.eye(4)
+            gripper_transform[:3, :3] = so3_sample[:3, :3] * normalization_scale
+            gripper_transform[:3, 3] = r3_sample.squeeze() * normalization_scale
+
+            # Log each sample's visualization
+            self.logger.experiment.log(
+                {
+                    f"generated_grasp_{batch_idx}": scene_to_wandb_image(scene),
+                    f"generated_grasp_{batch_idx}_transform": gripper_transform,
+                }
+            )

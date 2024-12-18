@@ -81,7 +81,7 @@ class FM_SE3(nn.Module):
             .to(device)
         )
 
-        r3_traj = torch.randn_like(r3_target).to(device)
+        r3_traj = torch.randn_like(r3_target, dtype=torch.float64).to(device)
 
         # Setup time steps
         t = torch.linspace(0, 1, steps).to(device)
