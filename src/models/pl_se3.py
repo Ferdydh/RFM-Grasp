@@ -5,6 +5,7 @@ from typing import Tuple, Dict, Any
 import pytorch_lightning as pl
 import torch
 from torch import Tensor
+import wandb
 
 from src.core.config import MLPExperimentConfig
 from src.core.visualize import check_collision
@@ -184,7 +185,17 @@ class FlowMatching(pl.LightningModule):
             normalization_scale,
         ) = self.trainer.train_dataloader.dataset[0]
 
+        print("Training end")
+        print("so3_input", so3_input)
+        print("r3_input", r3_input)
+        print("mesh_path", mesh_path)
+        print("dataset_mesh_scale", dataset_mesh_scale)
+        print("normalization_scale", normalization_scale)
+
         so3_output, r3_output = self.se3fm.sample(so3_input, r3_input)
+
+        print("so3_output", so3_output)
+        print("r3_output", r3_output)
 
         batch_size = so3_output.shape[0]  # Assuming first dimension is batch size
 
@@ -206,10 +217,15 @@ class FlowMatching(pl.LightningModule):
             gripper_transform[:3, :3] = so3_sample[:3, :3] * normalization_scale
             gripper_transform[:3, 3] = r3_sample.squeeze() * normalization_scale
 
+            gripper_transform = wandb.Table(
+                data=gripper_transform.cpu().numpy().tolist(),
+                columns=["rot1", "rot2", "rot3", "tr"],
+            )
+
             # Log each sample's visualization
             self.logger.experiment.log(
                 {
-                    f"generated_grasp_{batch_idx}": scene_to_wandb_image(scene),
-                    f"generated_grasp_{batch_idx}_transform": gripper_transform,
+                    f"val/generated_grasp_{batch_idx}": scene_to_wandb_image(scene),
+                    f"val/generated_grasp_{batch_idx}_transform": gripper_transform,
                 }
             )
