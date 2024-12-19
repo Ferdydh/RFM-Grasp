@@ -1,5 +1,6 @@
+import torch
 from src.core.visualize import check_collision
-from src.data.grasp_dataset import GraspDataset
+from src.data.dataset import GraspDataset
 from src.core.config import DataConfig
 from src.models.util import scene_to_wandb_image
 
@@ -22,6 +23,20 @@ if __name__ == "__main__":
         dataset_mesh_scale,
         normalization_scale,
     ) = test[0]
+
+    so3_input = torch.tensor(
+        [
+            [-0.2121, 0.3016, 0.9295],
+            [-0.1925, 0.9196, -0.3423],
+            [
+                -0.9581,
+                -0.2516,
+                -0.137,
+            ],
+        ]
+    )
+
+    r3_input = torch.tensor([1.602, 0.5431, 0.3002])
 
     print("SO3 Input:", so3_input)
     print("R3 Input:", r3_input)

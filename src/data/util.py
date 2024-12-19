@@ -8,20 +8,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# def enforce_trimesh(mesh) -> trimesh.Trimesh:
-#     if isinstance(mesh, trimesh.Scene):
-#         return trimesh.util.concatenate(
-#             tuple(
-#                 trimesh.Trimesh(vertices=m.vertices, faces=m.faces)
-#                 for m in mesh.geometry.values()
-#             )
-#         )
-#     elif isinstance(mesh, trimesh.Trimesh):
-#         return mesh
-#     else:
-#         raise ValueError(f"Unsupported mesh type: {type(mesh)}")
-
-
 def enforce_trimesh(mesh) -> trimesh.Trimesh:
     if isinstance(mesh, trimesh.Scene):
         # Get all meshes from the scene and preserve their transformations

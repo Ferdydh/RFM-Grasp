@@ -3,26 +3,25 @@ import torch.nn as nn
 from torch import Tensor
 from einops import rearrange
 
+from src.core.config import BaseExperimentConfig
+
 from .velocity_mlp import VelocityNetwork
 
 
 class FM_SO3(nn.Module):
     """Flow Matching model for SO(3) manifold."""
 
-    def __init__(self, hidden_dim: int = 64):
+    def __init__(self, config: BaseExperimentConfig):
         """
         Args:
             hidden_dim: Hidden dimension of the velocity network
         """
         super().__init__()
-        self.hidden_dim = hidden_dim
+
+        self.config = config
 
         # 9 for flattened 3x3 matrix
-        self.velocity_net = VelocityNetwork(
-            input_dim=9,
-            hidden_dim=hidden_dim,
-            activation=nn.SELU,
-        )
+        self.velocity_net = VelocityNetwork(input_dim=9, config=config)
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """Forward pass to compute velocity field.

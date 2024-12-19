@@ -7,20 +7,21 @@ import torch
 from torch import Tensor
 import wandb
 
-from src.core.config import MLPExperimentConfig
+from src.core.config import BaseExperimentConfig
 from src.core.visualize import check_collision
 from src.models.util import sample_location_and_conditional_flow, scene_to_wandb_image
 from src.models.fm_se3 import FM_SE3
-from .wasserstein import wasserstein_distance
 
 
 class FlowMatching(pl.LightningModule):
     """Flow Matching model combining SO3 and R3 manifold learning with synchronized time sampling."""
 
-    def __init__(self, config: MLPExperimentConfig):
+    def __init__(self, config: BaseExperimentConfig):
         super().__init__()
         self.config = config
-        self.se3fm = FM_SE3()
+        self.se3fm = FM_SE3(config)
+
+        # TODO use config
         self.sigma_min: float = 1e-4
         self.save_hyperparameters()
 
@@ -168,12 +169,19 @@ class FlowMatching(pl.LightningModule):
                 dataset_mesh_scale,
             )
 
-            # scene.show()
-            # exit()
+            gripper_transform = torch.eye(4)
+            gripper_transform[:3, :3] = so3_input[:3, :3]
+            gripper_transform[:3, 3] = r3_input.squeeze()
+
+            gripper_transform = wandb.Table(
+                data=gripper_transform.cpu().numpy().tolist(),
+                columns=["rot1", "rot2", "rot3", "tr"],
+            )
 
             self.logger.experiment.log(
                 {
                     f"{prefix}/original_grasp": scene_to_wandb_image(scene),
+                    f"{prefix}/original_grasp_transform": gripper_transform,
                 }
             )
 
@@ -214,8 +222,6 @@ class FlowMatching(pl.LightningModule):
                 mesh_path,
                 dataset_mesh_scale,
             )
-
-            # scene.show()
 
             gripper_transform = torch.eye(4)
             gripper_transform[:3, :3] = so3_sample[:3, :3]

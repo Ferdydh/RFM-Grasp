@@ -1,13 +1,15 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
+
+from src.core.config import BaseExperimentConfig
 from src.models.velocity_mlp import VelocityNetwork
 
 
 class FM_R3(nn.Module):
     """Rectified Flow Matching model."""
 
-    def __init__(self, hidden_dim: int = 64):
+    def __init__(self, config: BaseExperimentConfig):
         """
         Args:
             input_dim: Dimension of input data
@@ -15,10 +17,11 @@ class FM_R3(nn.Module):
             sigma_min: Minimum noise level
         """
         super().__init__()
-        self.hidden_dim = hidden_dim
+
+        self.config = config
 
         # 3 for R3
-        self.velocity_net = VelocityNetwork(3, hidden_dim)
+        self.velocity_net = VelocityNetwork(3, config)
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """Compute velocity field for given points and times.

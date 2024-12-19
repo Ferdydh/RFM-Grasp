@@ -7,10 +7,9 @@ from pytorch_lightning.callbacks import (
     EarlyStopping,
 )
 import wandb
-from datetime import datetime
 import atexit
 
-from src.data.grasp_dataset import DataHandler
+from src.data.dataset import DataModule
 
 from src.core.config import (
     MLPExperimentConfig,
@@ -98,7 +97,7 @@ def train(
         wandb.require("service")
 
         # Initialize data handler
-        data_handler = DataHandler(config)
+        data_handler = DataModule(config)
 
         # Train model
         trainer.fit(model=model, datamodule=data_handler)
