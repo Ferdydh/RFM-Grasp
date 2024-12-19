@@ -4,6 +4,8 @@ import trimesh
 import numpy as np
 from scipy.spatial import cKDTree
 
+from src.data.util import enforce_trimesh
+
 
 def create_parallel_gripper_mesh(
     color: List[int] = [0, 0, 255],
@@ -132,23 +134,19 @@ def check_collision(
     translation_vector: torch.Tensor,
     object_mesh_path: str,
     mesh_scale: float,
-    normalization_factor: float,
 ) -> Tuple[bool, trimesh.Scene, float]:
     """Checks for collisions between gripper and object."""
     # Load and scale object mesh
     object_mesh = trimesh.load(object_mesh_path)
-    if not isinstance(object_mesh, trimesh.Scene):
-        object_mesh.apply_scale(mesh_scale)
-    else:
-        # Handle scene scaling
-        for geom in object_mesh.geometry.values():
-            if isinstance(geom, trimesh.Trimesh):
-                geom.apply_scale(mesh_scale)
+    object_mesh.apply_scale(mesh_scale)
+
+    object_mesh = enforce_trimesh(object_mesh)
+    # object_mesh.vertices = object_mesh.vertices - object_mesh.centroid
 
     # Create transformation matrix
     gripper_transform = torch.eye(4)
-    gripper_transform[:3, :3] = rotation_matrix[:3, :3] * normalization_factor
-    gripper_transform[:3, 3] = translation_vector.squeeze() * normalization_factor
+    gripper_transform[:3, :3] = rotation_matrix[:3, :3]
+    gripper_transform[:3, 3] = translation_vector.squeeze()
     gripper_transform = gripper_transform.numpy()
 
     # Create and transform gripper mesh
@@ -165,9 +163,9 @@ def check_collision(
     #         if isinstance(geom, trimesh.Trimesh):
     #             combined_bounds[0] = np.minimum(combined_bounds[0], geom.bounds[0])
     #             combined_bounds[1] = np.maximum(combined_bounds[1], geom.bounds[1])
-    # print("Object bounds (combined):", combined_bounds)
+    #     print("Object bounds (combined):", combined_bounds)
     # else:
-    # print("Object bounds:", object_mesh.bounds)
+    #     print("Object bounds:", object_mesh.bounds)
 
     # Check collision
     has_collision, min_distance = _check_mesh_collision(gripper_mesh, object_mesh)

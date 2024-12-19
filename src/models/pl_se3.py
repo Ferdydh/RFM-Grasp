@@ -166,8 +166,10 @@ class FlowMatching(pl.LightningModule):
                 r3_input,
                 mesh_path,
                 dataset_mesh_scale,
-                normalization_scale,
             )
+
+            # scene.show()
+            # exit()
 
             self.logger.experiment.log(
                 {
@@ -186,16 +188,17 @@ class FlowMatching(pl.LightningModule):
         ) = self.trainer.train_dataloader.dataset[0]
 
         print("Training end")
-        print("so3_input", so3_input)
-        print("r3_input", r3_input)
-        print("mesh_path", mesh_path)
-        print("dataset_mesh_scale", dataset_mesh_scale)
-        print("normalization_scale", normalization_scale)
+        # print("so3_input", so3_input)
+        # print("r3_input", r3_input)
+        # print("mesh_path", mesh_path)
+        # print("dataset_mesh_scale", dataset_mesh_scale)
 
-        so3_output, r3_output = self.se3fm.sample(so3_input, r3_input)
+        so3_output, r3_output = self.se3fm.sample(
+            so3_input, r3_input, self.config.logging.num_samples_to_visualize
+        )
 
-        print("so3_output", so3_output)
-        print("r3_output", r3_output)
+        # print("so3_output", so3_output)
+        # print("r3_output", r3_output)
 
         batch_size = so3_output.shape[0]  # Assuming first dimension is batch size
 
@@ -210,12 +213,13 @@ class FlowMatching(pl.LightningModule):
                 r3_sample,
                 mesh_path,
                 dataset_mesh_scale,
-                normalization_scale,
             )
 
+            # scene.show()
+
             gripper_transform = torch.eye(4)
-            gripper_transform[:3, :3] = so3_sample[:3, :3] * normalization_scale
-            gripper_transform[:3, 3] = r3_sample.squeeze() * normalization_scale
+            gripper_transform[:3, :3] = so3_sample[:3, :3]
+            gripper_transform[:3, 3] = r3_sample.squeeze()
 
             gripper_transform = wandb.Table(
                 data=gripper_transform.cpu().numpy().tolist(),

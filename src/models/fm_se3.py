@@ -59,7 +59,7 @@ class FM_SE3(nn.Module):
 
     @torch.no_grad()
     def sample(
-        self, so3_target: Tensor, r3_target: Tensor, steps: int = 200
+        self, so3_target: Tensor, r3_target: Tensor, steps: int = 200, num_sample=2
     ) -> Tuple[Tensor, Tensor]:
         """Generate samples for both manifolds.
 
@@ -72,11 +72,10 @@ class FM_SE3(nn.Module):
             Tuple of (so3_samples, r3_samples)
         """
         device = so3_target.device
-        batch_size = so3_target.size(0)
 
         # Initialize trajectories
         so3_traj = (
-            torch.tensor(Rotation.random(batch_size).as_matrix(), dtype=torch.float64)
+            torch.tensor(Rotation.random(num_sample).as_matrix(), dtype=torch.float64)
             .reshape(-1, 9)
             .to(device)
         )
@@ -90,11 +89,11 @@ class FM_SE3(nn.Module):
         # Generate trajectories
         for t_i in t:
             t_batch = (
-                torch.tensor([t_i], dtype=torch.float64).repeat(batch_size).to(device)
+                torch.tensor([t_i], dtype=torch.float64).repeat(num_sample).to(device)
             )
             so3_traj, r3_traj = self.inference_step(so3_traj, r3_traj, t_batch, dt)
 
         # Reshape SO3 output
-        final_so3 = so3_traj.reshape(batch_size, 3, 3)
+        final_so3 = so3_traj.reshape(num_sample, 3, 3)
 
         return final_so3, r3_traj

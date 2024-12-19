@@ -156,7 +156,7 @@ class LoggingConfig:
         return cls(
             project_name="adlr",
             save_dir="logs",
-            num_samples_to_visualize=1,
+            num_samples_to_visualize=2,
             sample_every_n_epochs=1,
             log_every_n_steps=1,
             run_name=f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
@@ -167,7 +167,7 @@ class LoggingConfig:
         return cls(
             project_name="adlr",
             save_dir="logs",
-            num_samples_to_visualize=3,
+            num_samples_to_visualize=2,
             sample_every_n_epochs=50,
             log_every_n_steps=50,
             run_name=f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}",

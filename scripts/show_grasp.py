@@ -1,7 +1,7 @@
-import torch
 from src.core.visualize import check_collision
 from src.data.grasp_dataset import GraspDataset
 from src.core.config import DataConfig
+from src.models.util import scene_to_wandb_image
 
 
 if __name__ == "__main__":
@@ -12,7 +12,6 @@ if __name__ == "__main__":
         grasp_files=config.files,
         num_samples=config.sample_limit,
         split="test",
-        use_cache=False,
     )
 
     (
@@ -27,21 +26,13 @@ if __name__ == "__main__":
     print("SO3 Input:", so3_input)
     print("R3 Input:", r3_input)
     print("Mesh Path:", mesh_path)
-    print("Normalization Scale:", normalization_scale)
     print("Dataset Mesh Scale:", dataset_mesh_scale)
 
-    so3_input = torch.tensor(
-        [
-            [0.4741, -0.4337, 0.7662],
-            [0.1079, 0.8923, 0.4383],
-            [-0.8738, -0.1251, 0.4699],
-        ]
-    )
-
-    r3_input = torch.tensor([0.0928, 0.5226, 0.9479])
-
     has_collision, scene, min_distance = check_collision(
-        so3_input, r3_input, mesh_path, dataset_mesh_scale, normalization_scale
+        so3_input,
+        r3_input,
+        mesh_path,
+        dataset_mesh_scale,
     )
 
     # Print collision status
@@ -50,3 +41,6 @@ if __name__ == "__main__":
 
     # Show the scene
     scene.show()
+
+    img = scene_to_wandb_image(scene)
+    img.image.show()

@@ -1,12 +1,12 @@
 # Project structure related
-logs
-data
+/logs
+/data
 
 # Python
 __pycache__
 *.pyc
 .DS_Store
-.venv
+/.venv
 
 # vscode
-.vscode
+/.vscode

@@ -1,115 +1,99 @@
+from torch.utils.data import DataLoader
+from pytorch_lightning import LightningDataModule
+from dataclasses import dataclass
 import os
+from pathlib import Path
+import pickle
 import h5py
-import torch
-import torch.utils
-import torch.utils.data
-import torch.utils.data.dataset
-import trimesh
 import mesh2sdf
 import numpy as np
-from dataclasses import dataclass
-from typing import Optional, Dict, Tuple, List
-from torch.utils.data import Dataset, DataLoader, RandomSampler, Subset
-import pytorch_lightning as pl
-import pickle
+import torch
+from torch.utils.data import Dataset
+import trimesh
+from typing import Optional, List, Tuple
 import logging
-from pathlib import Path
-
 from src.core.config import MLPExperimentConfig, TransformerExperimentConfig
+from src.data.util import enforce_trimesh, process_mesh_to_sdf
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class CacheEntry:
-    """Data structure for cached SDF and scale information."""
+class GraspCacheEntry:
+    """Cache entry for processed grasp data."""
 
     sdf: np.ndarray
+    transforms: np.ndarray  # Scaled transforms
+    dataset_mesh_scale: float
     normalization_scale: float
-    timestamp: float
+    mesh_path: str
 
 
-def enforce_trimesh(mesh) -> trimesh.Trimesh:
-    if isinstance(mesh, trimesh.Scene):
-        return trimesh.util.concatenate(
-            tuple(
-                trimesh.Trimesh(vertices=m.vertices, faces=m.faces)
-                for m in mesh.geometry.values()
-            )
-        )
-    elif isinstance(mesh, trimesh.Trimesh):
-        return mesh
-    else:
-        raise ValueError(f"Unsupported mesh type: {type(mesh)}")
-
-
-def process_mesh_to_sdf(
-    mesh: trimesh.Trimesh, size: int = 32
-) -> Tuple[np.ndarray, float]:
-    """Process a mesh to SDF with consistent scaling and centering."""
-    centroid = mesh.centroid
-    vertices = mesh.vertices - centroid
-    normalization_scale = np.max(np.abs(vertices))
-    vertices = vertices / normalization_scale
-    faces = mesh.faces
-
-    vertices = vertices.astype(np.float32)
-    faces = faces.astype(np.uint32)
-
-    # First compute raw SDF
-    raw_sdf = mesh2sdf.compute(vertices, faces, size)
-    abs_sdf = np.abs(raw_sdf)
-
-    # Choose a level value within the range of the absolute SDF
-    level = (abs_sdf.min() + abs_sdf.max()) / 2
-
-    # Compute final SDF with appropriate level
-    sdf = mesh2sdf.compute(vertices, faces, size, fix=True, level=level)
-
-    return sdf, normalization_scale
-
-
-class SDFCache:
-    """Handle caching of SDF computations."""
+class GraspCache:
+    """Cache for processed grasp data."""
 
     def __init__(self, cache_dir: str):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_file = self.cache_dir / "sdf_cache.pkl"
-        self.cache = self._load_cache()
+        self.cache_file = self.cache_dir / "grasp_cache.pkl"
+        self.cache: dict[str, GraspCacheEntry] = {}
 
-    def _load_cache(self) -> Dict[str, CacheEntry]:
         if self.cache_file.exists():
             try:
                 with open(self.cache_file, "rb") as f:
-                    return pickle.load(f)
+                    self.cache = pickle.load(f)
             except Exception as e:
                 logger.warning(f"Failed to load cache: {e}. Starting with empty cache.")
-                return {}
-        return {}
 
-    def _save_cache(self):
+    def get_or_process(
+        self, grasp_filename: str, data_root: str, sdf_size: int
+    ) -> GraspCacheEntry:
+        """Get cached data or process and cache if not available."""
+        if grasp_filename in self.cache:
+            logger.info(f"Loading {grasp_filename} from cache")
+            return self.cache[grasp_filename]
+
+        logger.info(f"Processing {grasp_filename}")
+        grasp_file = os.path.join(data_root, "grasps", grasp_filename)
+
+        with h5py.File(grasp_file, "r") as h5file:
+            mesh_fname = h5file["object/file"][()].decode("utf-8")
+            dataset_mesh_scale = h5file["object/scale"][()]
+
+            transforms = h5file["grasps"]["transforms"][:]
+            grasp_success = h5file["grasps"]["qualities"]["flex"]["object_in_gripper"][
+                :
+            ]
+            transforms = transforms[grasp_success == 1]
+
+        # Load and process mesh
+        mesh_path = os.path.join(data_root, mesh_fname)
+        mesh = trimesh.load(mesh_path)
+        mesh = mesh.apply_scale(dataset_mesh_scale)
+        mesh = enforce_trimesh(mesh)
+
+        # Compute SDF and transform grasps
+        sdf, normalization_scale, centroid = process_mesh_to_sdf(mesh, sdf_size)
+
+        # Create and cache entry
+        entry = GraspCacheEntry(
+            sdf=sdf,
+            transforms=transforms,
+            dataset_mesh_scale=dataset_mesh_scale,
+            normalization_scale=normalization_scale,
+            mesh_path=mesh_path,
+        )
+        self.cache[grasp_filename] = entry
+
+        # Save cache
         try:
             with open(self.cache_file, "wb") as f:
                 pickle.dump(self.cache, f)
         except Exception as e:
             logger.error(f"Failed to save cache: {e}")
 
-    def get(self, mesh_path: str) -> Optional[Tuple[np.ndarray, float]]:
-        if mesh_path not in self.cache:
-            return None
-
-        entry = self.cache[mesh_path]
-        return entry.sdf, entry.normalization_scale
-
-    def put(self, mesh_path: str, sdf: np.ndarray, normalization_scale: float):
-        self.cache[mesh_path] = CacheEntry(
-            sdf=sdf,
-            normalization_scale=normalization_scale,
-            timestamp=os.path.getmtime(mesh_path),
-        )
-        self._save_cache()
+        return entry
 
 
 class GraspDataset(Dataset):
@@ -120,116 +104,60 @@ class GraspDataset(Dataset):
         split: str = "train",
         num_samples: Optional[int] = None,
         sdf_size: int = 32,
-        use_cache: bool = True,
     ):
         self.data_root = data_root
-        self.grasp_files = grasp_files
-        self.split = split
-        self.num_samples = num_samples
         self.sdf_size = sdf_size
-        self.use_cache = use_cache
+        self.cache = GraspCache(os.path.join(data_root, "grasp_cache"))
 
-        # Initialize cache
-        self.cache = SDFCache(os.path.join(data_root, "sdf_cache"))
+        # Process all grasp files
+        self.grasp_entries = []
+        total_grasps = 0
 
-        # Process meshes and grasps
-        self.mesh_to_sdf = {}
-        self.mesh_to_normalization_scale = {}
-        self.processed_data = []  # List to store all processed grasps
+        for filename in grasp_files:
+            entry = self.cache.get_or_process(filename, data_root, sdf_size)
+            num_grasps = len(entry.transforms)
+            self.grasp_entries.append(
+                (filename, total_grasps, total_grasps + num_grasps)
+            )
+            total_grasps += num_grasps
 
-        # Process all grasp files and their corresponding meshes
-        self._process_all_data()
+        self.total_grasps = total_grasps
 
         # Sample if needed
-        if num_samples and num_samples < len(self.processed_data):
-            indices = torch.randperm(len(self.processed_data))[:num_samples]
-            self.processed_data = [self.processed_data[i] for i in indices]
-
-    def _process_all_data(self):
-        """Process all grasp files and their corresponding meshes."""
-        total_files = len(self.grasp_files)
-
-        for idx, grasp_filename in enumerate(self.grasp_files, 1):
-            # Construct full path to grasp file
-            grasp_file = os.path.join(self.data_root, "grasps", grasp_filename)
-            logger.info(f"Processing grasp file {idx}/{total_files}: {grasp_filename}")
-
-            # Load grasp file and get mesh information
-            with h5py.File(grasp_file, "r") as h5file:
-                mesh_fname = h5file["object/file"][()].decode("utf-8")
-                dataset_mesh_scale = h5file["object/scale"][()]
-
-                # Load transforms and filter successful grasps
-                transforms = h5file["grasps"]["transforms"][:]
-                grasp_success = h5file["grasps"]["qualities"]["flex"][
-                    "object_in_gripper"
-                ][:]
-                transforms = transforms[grasp_success == 1]
-
-            # Load and scale mesh
-            mesh_path = os.path.join(self.data_root, mesh_fname)
-
-            # Process mesh to SDF if not in cache
-            if mesh_path not in self.mesh_to_sdf:
-                cache_result = self.cache.get(mesh_path)
-
-                if self.use_cache and cache_result is not None:
-                    sdf, normalization_scale = cache_result
-                    logger.info(f"Loaded {os.path.basename(mesh_path)} from cache")
-                else:
-                    mesh = trimesh.load(mesh_path)
-                    mesh = mesh.apply_scale(dataset_mesh_scale)
-                    mesh = enforce_trimesh(mesh)
-
-                    logger.info(f"Computing SDF for {os.path.basename(mesh_path)}")
-                    sdf, normalization_scale = process_mesh_to_sdf(mesh, self.sdf_size)
-                    self.cache.put(mesh_path, sdf, normalization_scale)
-
-                self.mesh_to_sdf[mesh_path] = sdf
-                self.mesh_to_normalization_scale[mesh_path] = normalization_scale
-
-            # Scale and store transforms
-            normalization_scale = self.mesh_to_normalization_scale[mesh_path]
-            for transform in transforms:
-                scaled_transform = transform.copy() / normalization_scale
-                self.processed_data.append(
-                    {
-                        "mesh_path": mesh_path,
-                        "transform": torch.tensor(
-                            scaled_transform, dtype=torch.float32
-                        ),
-                        "dataset_mesh_scale": float(dataset_mesh_scale),
-                        "normalization_scale": float(normalization_scale),
-                    }
-                )
+        if num_samples and num_samples < self.total_grasps:
+            selected_indices = torch.randperm(self.total_grasps)[:num_samples]
+            self.selected_indices = sorted(selected_indices.tolist())
+            self.total_grasps = num_samples
+        else:
+            self.selected_indices = None
 
     def __len__(self):
-        return len(self.processed_data)
+        return self.total_grasps
 
     def __getitem__(
         self, idx: int
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, str, float, float]:
-        data_point = self.processed_data[idx]
-        mesh_path = data_point["mesh_path"]
-        transform = data_point["transform"]
-        dataset_mesh_scale = data_point["dataset_mesh_scale"]
-        normalization_scale = data_point["normalization_scale"]
+        if self.selected_indices is not None:
+            idx = self.selected_indices[idx]
 
-        rotation = transform[:3, :3]
-        translation = transform[:3, 3]
-        sdf = torch.tensor(self.mesh_to_sdf[mesh_path])
+        # Find which grasp file contains this index
+        for filename, start_idx, end_idx in self.grasp_entries:
+            if start_idx <= idx < end_idx:
+                entry = self.cache.cache[filename]
+                grasp_idx = idx - start_idx
+                transform = entry.transforms[grasp_idx]
 
-        return (
-            rotation,
-            translation,
-            sdf,
-            mesh_path,
-            dataset_mesh_scale,
-            normalization_scale,
-        )
+                return (
+                    torch.tensor(transform[:3, :3]),  # rotation
+                    torch.tensor(transform[:3, 3]),  # translation
+                    torch.tensor(entry.sdf),
+                    entry.mesh_path,
+                    entry.dataset_mesh_scale,
+                    entry.normalization_scale,
+                )
 
 
-class DataHandler(pl.LightningDataModule):
+class DataHandler(LightningDataModule):
     def __init__(
         self,
         config: MLPExperimentConfig | TransformerExperimentConfig,
@@ -260,10 +188,6 @@ class DataHandler(pl.LightningDataModule):
             # Calculate split sizes
             train_size = int(len(full_dataset) * self.split_ratio)
             val_size = len(full_dataset) - train_size
-
-            print("train_size", train_size)
-            print("val_size", val_size)
-            print("len(full_dataset)", len(full_dataset))
 
             if train_size == len(full_dataset) or val_size == 0 or train_size == 0:
                 # This should only happen if we have sample_limit=1 or split_ratio=1.0
