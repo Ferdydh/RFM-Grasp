@@ -1,11 +1,11 @@
 from pytorch_lightning import LightningDataModule
 import os
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, dataset
 from typing import Optional, List, Tuple
 import logging
 
-from src.core.config import MLPExperimentConfig, TransformerExperimentConfig
+from src.core.config import BaseExperimentConfig
 from src.data.data_manager import GraspCache
 
 logging.basicConfig(level=logging.INFO)
@@ -76,7 +76,7 @@ class GraspDataset(Dataset):
 class DataModule(LightningDataModule):
     def __init__(
         self,
-        config: MLPExperimentConfig | TransformerExperimentConfig,
+        config: BaseExperimentConfig,
     ):
         super().__init__()
         self.config = config
@@ -110,10 +110,8 @@ class DataModule(LightningDataModule):
                 self.train_dataset = full_dataset
                 self.val_dataset = full_dataset
             else:
-                self.train_dataset, self.val_dataset = (
-                    torch.utils.data.dataset.random_split(
-                        full_dataset, [train_size, val_size]
-                    )
+                self.train_dataset, self.val_dataset = dataset.random_split(
+                    full_dataset, [train_size, val_size]
                 )
 
     def train_dataloader(self):
