@@ -57,20 +57,21 @@ class GraspDataset(Dataset):
             idx = self.selected_indices[idx]
 
         # Find which grasp file contains this index
-        for filename, start_idx, end_idx in self.grasp_entries:
-            if start_idx <= idx < end_idx:
-                entry = self.cache.cache[filename]
-                grasp_idx = idx - start_idx
-                transform = entry.transforms[grasp_idx]
+        entry_match = next(
+            (entry for entry in self.grasp_entries if entry[1] <= idx < entry[2])
+        )
+        filename, start_idx, _ = entry_match
+        entry = self.cache.cache[filename]
+        grasp_idx = idx - start_idx
 
-                return (
-                    torch.tensor(transform[:3, :3]),  # rotation
-                    torch.tensor(transform[:3, 3]),  # translation
-                    torch.tensor(entry.sdf),
-                    entry.mesh_path,
-                    entry.dataset_mesh_scale,
-                    entry.normalization_scale,
-                )
+        return (
+            torch.tensor(entry.transforms[grasp_idx][:3, :3]),  # rotation
+            torch.tensor(entry.transforms[grasp_idx][:3, 3]),  # translation
+            torch.tensor(entry.sdf),
+            entry.mesh_path,
+            entry.dataset_mesh_scale,
+            entry.normalization_scale,
+        )
 
 
 class DataModule(LightningDataModule):
