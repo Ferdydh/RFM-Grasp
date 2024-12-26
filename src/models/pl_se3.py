@@ -97,6 +97,13 @@ class FlowMatching(pl.LightningModule):
     def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
         """Training step implementation."""
         so3_input, r3_input, *_ = batch
+
+        # Repeat the batch if its size is smaller than the configured batch size
+        if so3_input.shape[0] < self.config.data.batch_size:
+            repeat_factor = (self.config.data.batch_size // so3_input.shape[0]) + 1
+            so3_input = so3_input.repeat(repeat_factor, 1, 1)[:self.config.data.batch_size]
+            r3_input = r3_input.repeat(repeat_factor, 1)[:self.config.data.batch_size]
+
         loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
 
         self.log_dict(
