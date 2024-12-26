@@ -136,6 +136,7 @@ class FlowMatching(pl.LightningModule):
         # Calculate Wasserstein distance every 100 epochs
         current_epoch = self.current_epoch
         if current_epoch > 0 and current_epoch % 100 == 0:
+            # creates config batch size amount of noise and compare the resulting points with them
             wasserstein_metrics = self._calculate_wasserstein_metrics(so3_input, r3_input)
             log_dict.update({
                 f"train/wasserstein_so3": wasserstein_metrics["wasserstein_so3"],
