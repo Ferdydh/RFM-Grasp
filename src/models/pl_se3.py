@@ -6,11 +6,13 @@ import pytorch_lightning as pl
 import torch
 from torch import Tensor
 import wandb
+from src.data.util import denormalize_translation
 
 from src.core.config import BaseExperimentConfig
 from src.core.visualize import check_collision
 from src.models.util import sample_location_and_conditional_flow, scene_to_wandb_image
 from src.models.fm_se3 import FM_SE3
+from src.models.wasserstein import wasserstein_distance
 
 
 class FlowMatching(pl.LightningModule):
@@ -94,17 +96,51 @@ class FlowMatching(pl.LightningModule):
         """Forward pass through the model."""
         return self.se3fm.forward(so3_input, r3_input, t)
 
-    def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
-        """Training step implementation."""
-        so3_input, r3_input, *_ = batch
-
-        # Repeat the batch if its size is smaller than the configured batch size
-        if so3_input.shape[0] < self.config.data.batch_size:
+    def _adjust_batch_size(self, so3_input: Tensor, r3_input: Tensor) -> Tuple[Tensor, Tensor]:
+        """Adjust batch size by repeating if necessary."""
+        if (so3_input.shape[0] < self.config.data.batch_size):
             repeat_factor = (self.config.data.batch_size // so3_input.shape[0]) + 1
             so3_input = so3_input.repeat(repeat_factor, 1, 1)[:self.config.data.batch_size]
             r3_input = r3_input.repeat(repeat_factor, 1)[:self.config.data.batch_size]
+        return so3_input, r3_input
 
-        loss, log_dict = self.compute_loss(so3_input, r3_input, "train")
+    def _calculate_wasserstein_metrics(self, so3_input: Tensor, r3_input: Tensor) -> Dict[str, float]:
+        """Calculate Wasserstein distances between input and generated samples."""
+        # Generate samples
+        so3_output, r3_output = self.se3fm.sample(
+            r3_input.device, num_samples=self.config.data.batch_size
+        )
+
+        # Compute Wasserstein distances
+        w_dist_so3 = wasserstein_distance(
+            so3_input, so3_output,
+            space="so3", method="exact", power=2
+        )
+        w_dist_r3 = wasserstein_distance(
+            r3_input, r3_output,
+            space="r3", method="exact", power=2
+        )
+
+        return {
+            "wasserstein_so3": w_dist_so3,
+            "wasserstein_r3": w_dist_r3
+        }
+
+    def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
+        """Training step implementation."""
+        so3_input, r3_input, *_ = batch
+        so3_input_expanded, r3_input_expanded = self._adjust_batch_size(so3_input, r3_input)
+        
+        loss, log_dict = self.compute_loss(so3_input_expanded, r3_input_expanded, "train")
+
+        # Calculate Wasserstein distance every 100 epochs
+        current_epoch = self.current_epoch
+        if current_epoch > 0 and current_epoch % 100 == 0:
+            wasserstein_metrics = self._calculate_wasserstein_metrics(so3_input, r3_input)
+            log_dict.update({
+                f"train/wasserstein_so3": wasserstein_metrics["wasserstein_so3"],
+                f"train/wasserstein_r3": wasserstein_metrics["wasserstein_r3"]
+            })
 
         self.log_dict(
             log_dict,
@@ -117,6 +153,9 @@ class FlowMatching(pl.LightningModule):
     def validation_step(self, batch: Tuple, batch_idx: int) -> Dict[str, Tensor]:
         """Validation step implementation."""
         so3_input, r3_input, *_ = batch
+
+        #Repeat dataset until target batch size is obtained
+        so3_input, r3_input = self._adjust_batch_size(so3_input, r3_input)
 
         with torch.enable_grad():
             loss, log_dict = self.compute_loss(so3_input, r3_input, "val")
@@ -163,12 +202,14 @@ class FlowMatching(pl.LightningModule):
             (
                 so3_input,
                 r3_input,
+                norm_params,
                 _,  # sdf_input
                 mesh_path,
                 dataset_mesh_scale,
                 normalization_scale,
             ) = dataset[0]
 
+            r3_input = denormalize_translation(r3_input,norm_params)
             has_collision, scene, min_distance = check_collision(
                 so3_input,
                 r3_input,
@@ -196,6 +237,7 @@ class FlowMatching(pl.LightningModule):
         (
             so3_input,
             r3_input,
+            norm_params,
             _,  # sdf_input
             mesh_path,
             dataset_mesh_scale,
@@ -203,17 +245,29 @@ class FlowMatching(pl.LightningModule):
         ) = self.trainer.train_dataloader.dataset[0]
 
         print("Training end")
-        # print("so3_input", so3_input)
-        # print("r3_input", r3_input)
-        # print("mesh_path", mesh_path)
-        # print("dataset_mesh_scale", dataset_mesh_scale)
 
+        # Generate samples
         so3_output, r3_output = self.se3fm.sample(
-            so3_input, r3_input, self.config.logging.num_samples_to_visualize
+            r3_input.device, self.config.logging.num_samples_to_visualize
+        )
+        r3_output = denormalize_translation(r3_output, norm_params)
+        r3_input = denormalize_translation(r3_input, norm_params)
+
+        # Compute Wasserstein distances
+        w_dist_so3 = wasserstein_distance(
+            so3_input.unsqueeze(0), so3_output,
+            space="so3", method="exact", power=2
+        )
+        w_dist_r3 = wasserstein_distance(
+            r3_input.unsqueeze(0), r3_output,
+            space="r3", method="exact", power=2
         )
 
-        # print("so3_output", so3_output)
-        # print("r3_output", r3_output)
+        # Log Wasserstein distances
+        self.logger.experiment.log({
+            "val/wasserstein_distance_so3": w_dist_so3,
+            "val/wasserstein_distance_r3": w_dist_r3,
+        })
 
         batch_size = so3_output.shape[0]  # Assuming first dimension is batch size
 

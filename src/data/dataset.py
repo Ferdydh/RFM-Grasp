@@ -1,16 +1,18 @@
 from pytorch_lightning import LightningDataModule
 import os
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, dataset
 from typing import Optional, List, Tuple
 import logging
+from collections import namedtuple
 
 from src.core.config import BaseExperimentConfig
 from src.data.data_manager import GraspCache
+from src.data.util import NormalizationParams, normalize_translation
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 class GraspDataset(Dataset):
     def __init__(
@@ -35,9 +37,23 @@ class GraspDataset(Dataset):
             self.grasp_entries.append(
                 (filename, total_grasps, total_grasps + num_grasps)
             )
+                        # Calculate min/max for normalization
+            translations = entry.transforms[:, :3, 3]  # Get translation parts
+            if not hasattr(self, 'trans_min'):
+                self.trans_min = translations.min(axis=0)
+                self.trans_max = translations.max(axis=0)
+            else:
+                self.trans_min = np.minimum(self.trans_min, translations.min(axis=0))
+                self.trans_max = np.maximum(self.trans_max, translations.max(axis=0))
             total_grasps += num_grasps
 
         self.total_grasps = total_grasps
+
+        self.norm_params = NormalizationParams(
+            min=torch.tensor(self.trans_min),
+            max=torch.tensor(self.trans_max)
+        )
+        print("Calculated min_max values: ",self.trans_min,self.trans_max)
 
         # Sample if needed
         if num_samples and num_samples < self.total_grasps:
@@ -52,7 +68,7 @@ class GraspDataset(Dataset):
 
     def __getitem__(
         self, idx: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, str, float, float]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, str, float, float, NormalizationParams]:
         if self.selected_indices is not None:
             idx = self.selected_indices[idx]
 
@@ -64,9 +80,15 @@ class GraspDataset(Dataset):
         entry = self.cache.cache[filename]
         grasp_idx = idx - start_idx
 
+        rotation = torch.tensor(entry.transforms[grasp_idx][:3, :3])
+        translation = torch.tensor(entry.transforms[grasp_idx][:3, 3])
+        normalized_translation = normalize_translation(translation, self.norm_params)
+
+
         return (
-            torch.tensor(entry.transforms[grasp_idx][:3, :3]),  # rotation
-            torch.tensor(entry.transforms[grasp_idx][:3, 3]),  # translation
+            rotation,
+            normalized_translation,
+            self.norm_params,
             torch.tensor(entry.sdf),
             entry.mesh_path,
             entry.dataset_mesh_scale,

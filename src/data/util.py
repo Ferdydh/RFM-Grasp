@@ -3,9 +3,21 @@ from typing import Tuple
 import mesh2sdf
 import numpy as np
 import trimesh
+from collections import namedtuple
+import torch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+NormalizationParams = namedtuple('NormalizationParams', ['min', 'max'])
+
+def normalize_translation(translation: torch.Tensor, norm_params: NormalizationParams) -> torch.Tensor:
+    """Normalize translation to [-1, 1] range using stored min/max values."""
+    return 2 * (translation - norm_params.min) / (norm_params.max - norm_params.min) - 1
+
+def denormalize_translation(normalized: torch.Tensor, norm_params: NormalizationParams) -> torch.Tensor:
+    """Denormalize translation from [-1, 1] range using stored min/max values."""
+    return 0.5 * (normalized + 1.0) * (norm_params.max - norm_params.min) + norm_params.min
 
 
 def enforce_trimesh(mesh) -> trimesh.Trimesh:

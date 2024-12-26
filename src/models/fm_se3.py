@@ -60,28 +60,27 @@ class FM_SE3(nn.Module):
 
     @torch.no_grad()
     def sample(
-        self, so3_target: Tensor, r3_target: Tensor, steps: int = 200, num_sample=2
+        self, device: torch.device, num_samples: int = 1, steps: int = 200
     ) -> Tuple[Tensor, Tensor]:
         """Generate samples for both manifolds.
 
         Args:
-            so3_target: Target SO3 matrices [batch, 3, 3]
-            r3_target: Target R3 points [batch, 3]
+            device: Device to generate samples on
+            num_samples: Number of samples to generate
             steps: Number of integration steps
 
         Returns:
-            Tuple of (so3_samples, r3_samples)
+            Tuple of (so3_samples, r3_samples) where:
+                so3_samples: [num_samples, 3, 3]
+                r3_samples: [num_samples, 3]
         """
-        device = so3_target.device
-
-        # Initialize trajectories
+        # Initialize random starting points
         so3_traj = (
-            torch.tensor(Rotation.random(num_sample).as_matrix(), dtype=torch.float64)
+            torch.tensor(Rotation.random(num_samples).as_matrix(), dtype=torch.float64)
             .reshape(-1, 9)
             .to(device)
         )
-
-        r3_traj = torch.randn_like(r3_target, dtype=torch.float64).to(device)
+        r3_traj = torch.randn(num_samples, 3, dtype=torch.float64).to(device)
 
         # Setup time steps
         t = torch.linspace(0, 1, steps).to(device)
@@ -90,11 +89,13 @@ class FM_SE3(nn.Module):
         # Generate trajectories
         for t_i in t:
             t_batch = (
-                torch.tensor([t_i], dtype=torch.float64).repeat(num_sample).to(device)
+                torch.tensor([t_i], dtype=torch.float64)
+                .repeat(num_samples)
+                .to(device)
             )
             so3_traj, r3_traj = self.inference_step(so3_traj, r3_traj, t_batch, dt)
 
         # Reshape SO3 output
-        final_so3 = so3_traj.reshape(num_sample, 3, 3)
+        final_so3 = so3_traj.reshape(num_samples, 3, 3)
 
         return final_so3, r3_traj
