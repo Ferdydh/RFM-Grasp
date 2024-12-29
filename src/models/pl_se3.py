@@ -135,6 +135,8 @@ class FlowMatching(pl.LightningModule):
 
         # Calculate Wasserstein distance every 100 epochs
         current_epoch = self.current_epoch
+        #TODO: make once each n epochs a parameter
+        #TODO: instead of using just a batch 
         if current_epoch > 0 and current_epoch % 100 == 0:
             # creates config batch size amount of noise and compare the resulting points with them
             wasserstein_metrics = self._calculate_wasserstein_metrics(so3_input, r3_input)
@@ -251,6 +253,8 @@ class FlowMatching(pl.LightningModule):
         so3_output, r3_output = self.se3fm.sample(
             r3_input.device, self.config.logging.num_samples_to_visualize
         )
+
+        #TODO maybe make this one line (It's not a requirement.)
         r3_output = denormalize_translation(r3_output, norm_params)
         r3_input = denormalize_translation(r3_input, norm_params)
 

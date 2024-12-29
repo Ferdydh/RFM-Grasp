@@ -30,6 +30,7 @@ class GraspDataset(Dataset):
         # Process all grasp files
         self.grasp_entries = []
         total_grasps = 0
+        #TODO: Why does normalization works better check it.
 
         for filename in grasp_files:
             entry = self.cache.get_or_process(filename, data_root, sdf_size)

@@ -51,6 +51,7 @@ def pairwise_geodesic_distance(x0, x1):
     x1_exp = x1.unsqueeze(0).expand(n_samples_x0, n_samples_x1, 3, 3)
 
     # Compute relative rotations
+    #TODO: Check if everything is at a certain point(collapse)
     rel_rot = torch.matmul(x0_exp.transpose(-1, -2), x1_exp)
 
     # Compute the trace of the relative rotations
