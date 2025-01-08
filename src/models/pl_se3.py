@@ -9,9 +9,14 @@ import wandb
 from src.data.util import denormalize_translation
 
 from src.core.config import BaseExperimentConfig
-from src.core.visualize import check_collision, check_collision_multiple_grasps
-from src.models.util import sample_location_and_conditional_flow, scene_to_wandb_image
-from src.models.fm_se3 import FM_SE3
+from src.core.visualize import (
+    check_collision,
+    check_collision_multiple_grasps,
+    scene_to_wandb_image,
+)
+from src.models.flow import sample, sample_location_and_conditional_flow
+
+from src.models.velocity_mlp import VelocityNetwork
 from src.models.wasserstein import wasserstein_distance
 
 
@@ -21,7 +26,7 @@ class FlowMatching(pl.LightningModule):
     def __init__(self, config: BaseExperimentConfig):
         super().__init__()
         self.config = config
-        self.se3fm = FM_SE3(config)
+        self.model = VelocityNetwork()
 
         # TODO use config
         self.sigma_min: float = 1e-4
@@ -56,7 +61,18 @@ class FlowMatching(pl.LightningModule):
 
         # Get velocity prediction for SO3
         xt_flat = rearrange(xt_so3, "b c d -> b (c d)", c=3, d=3)
-        vt_so3 = self.se3fm.so3fm.forward(xt_flat, t[:, None])
+
+        # R3 computation with same time points
+        t_expanded = t.unsqueeze(-1)  # [batch, 1]
+        noise = torch.randn_like(r3_inputs)
+
+        # Get predicted flow for R3
+        x_t_r3 = (
+            1 - (1 - self.sigma_min) * t_expanded
+        ) * noise + t_expanded * r3_inputs
+
+        vt_so3, predicted_flow = self.forward(xt_flat, x_t_r3, t_expanded)
+
         vt_so3 = rearrange(vt_so3, "b (c d) -> b c d", c=3, d=3)
 
         # Compute SO3 loss using Riemannian metric
@@ -64,20 +80,9 @@ class FlowMatching(pl.LightningModule):
         norm = -torch.diagonal(r @ r, dim1=-2, dim2=-1).sum(dim=-1) / 2
         so3_loss = torch.mean(norm, dim=-1)
 
-        # R3 computation with same time points
-        t_expanded = t.unsqueeze(-1)  # [batch, 1]
-        noise = torch.randn_like(r3_inputs)
-
         # Compute noisy sample and optimal flow for R3
-        x_t_r3 = (
-            1 - (1 - self.sigma_min) * t_expanded
-        ) * noise + t_expanded * r3_inputs
         optimal_flow = r3_inputs - (1 - self.sigma_min) * noise
 
-        # Get predicted flow for R3
-        predicted_flow = self.se3fm.r3fm.forward(x_t_r3, t_expanded)
-
-        # Compute R3 MSE loss
         r3_loss = F.mse_loss(predicted_flow, optimal_flow)
 
         total_loss = so3_loss + r3_loss
@@ -94,7 +99,7 @@ class FlowMatching(pl.LightningModule):
         self, so3_input: Tensor, r3_input: Tensor, t: Tensor
     ) -> Tuple[Tensor, Tensor]:
         """Forward pass through the model."""
-        return self.se3fm.forward(so3_input, r3_input, t)
+        return self.model.forward(so3_input, r3_input, t)
 
     def _adjust_batch_size(
         self, so3_input: Tensor, r3_input: Tensor
@@ -113,8 +118,8 @@ class FlowMatching(pl.LightningModule):
     ) -> Dict[str, float]:
         """Calculate Wasserstein distances between input and generated samples."""
         # Generate samples
-        so3_output, r3_output = self.se3fm.sample(
-            r3_input.device, num_samples=self.config.data.batch_size
+        so3_output, r3_output = sample(
+            self.model, r3_input.device, num_samples=self.config.data.batch_size
         )
 
         # Compute Wasserstein distances
@@ -271,8 +276,8 @@ class FlowMatching(pl.LightningModule):
         ) = self.trainer.train_dataloader.dataset[0]
 
         # Generate samples
-        so3_output, r3_output = self.se3fm.sample(
-            r3_input.device, self.config.logging.num_samples_to_visualize
+        so3_output, r3_output = sample(
+            self.model, r3_input.device, self.config.logging.num_samples_to_visualize
         )
 
         # TODO maybe make this one line (It's not a requirement.)

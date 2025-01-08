@@ -1,54 +1,11 @@
-import trimesh
-import wandb
+from scipy.spatial.transform import Rotation
+from typing import Tuple
 import torch
 from einops import rearrange
-from torch import vmap
+from torch import Tensor, vmap
 from geomstats.geometry.special_orthogonal import SpecialOrthogonal
 
-
-def scene_to_wandb_image(scene: trimesh.Scene) -> wandb.Image:
-    """
-    Log a colored front view of a trimesh scene using PyVista's off-screen rendering.
-    Returns a low-res wandb.Image for basic visualization.
-    """
-    import pyvista as pv
-    import numpy as np
-
-    # Convert trimesh scene to PyVista
-    plotter = pv.Plotter(off_screen=True)
-
-    # Add each mesh from the scene
-    for geometry in scene.geometry.values():
-        if hasattr(geometry, "vertices") and hasattr(geometry, "faces"):
-            # Convert trimesh to PyVista
-            mesh = pv.PolyData(
-                geometry.vertices,
-                np.hstack([[3] + face.tolist() for face in geometry.faces]),
-            )
-
-            # Handle color
-            if hasattr(geometry, "visual") and hasattr(geometry.visual, "face_colors"):
-                face_colors = geometry.visual.face_colors
-                if face_colors is not None:
-                    # Convert RGBA to RGB if needed
-                    if face_colors.shape[1] == 4:
-                        face_colors = face_colors[:, :3]
-                    mesh.cell_data["colors"] = face_colors
-                    plotter.add_mesh(mesh, scalars="colors", rgb=True)
-            else:
-                # Default color if no colors specified
-                plotter.add_mesh(mesh, color="lightgray")
-
-    # # Set a very low resolution
-    plotter.window_size = [1024, 1024]
-
-    # Get the image array
-    img_array = plotter.screenshot(return_img=True)
-
-    # Close the plotter
-    plotter.close()
-
-    return wandb.Image(img_array)
+from src.models.velocity_mlp import VelocityNetwork
 
 
 def rotmat_to_rotvec(matrix):
@@ -167,3 +124,79 @@ def sample_location_and_conditional_flow(x0, x1, t):
     ut = rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
 
     return xt, ut
+
+
+@torch.no_grad()
+def inference_step(
+    model: VelocityNetwork, so3_state: Tensor, r3_state: Tensor, t: Tensor, dt: Tensor
+) -> Tuple[Tensor, Tensor]:
+    """Single step inference.
+
+    Args:
+        model: VelocityNetwork model
+        so3_state: Current SO3 state [batch, 9]
+        r3_state: Current R3 state [batch, 3]
+        t: Current time [batch, 1]
+        dt: Time step size [1]
+
+    Returns:
+        Tuple of (next_so3_state, next_r3_state)
+    """
+    # Get velocities
+    so3_velocity, r3_velocity = model(so3_state, r3_state, t)
+
+    # R3 update
+    r3_next = r3_state + dt * r3_velocity
+
+    # SO3 update with exponential map
+    so3_velocity = rearrange(so3_velocity, "b (c d) -> b c d", c=3, d=3)
+    so3_state = rearrange(so3_state, "b (c d) -> b c d", c=3, d=3)
+    skew_sym = torch.einsum("...ij,...ik->...jk", so3_state, so3_velocity * dt)
+    so3_next = torch.einsum(
+        "...ij,...jk->...ik", so3_state, torch.linalg.matrix_exp(skew_sym)
+    )
+    so3_next = rearrange(so3_next, "b c d -> b (c d)", c=3, d=3)
+
+    return so3_next, r3_next
+
+
+@torch.no_grad()
+def sample(
+    model: VelocityNetwork, device: torch.device, num_samples: int = 1, steps: int = 200
+) -> Tuple[Tensor, Tensor]:
+    """Generate samples.
+
+    Args:
+        model: VelocityNetwork model
+        device: Device to generate samples on
+        num_samples: Number of samples to generate
+        steps: Number of integration steps
+
+    Returns:
+        Tuple of (so3_samples, r3_samples) where:
+            so3_samples: [num_samples, 3, 3]
+            r3_samples: [num_samples, 3]
+    """
+    # Initialize random starting points
+    so3_traj = (
+        torch.tensor(Rotation.random(num_samples).as_matrix(), dtype=torch.float64)
+        .reshape(-1, 9)
+        .to(device)
+    )
+    r3_traj = torch.randn(num_samples, 3, dtype=torch.float64).to(device)
+
+    # Setup time steps
+    t = torch.linspace(0, 1, steps).to(device)
+    dt = torch.tensor([1 / steps]).to(device)
+
+    # Generate trajectories
+    for t_i in t:
+        t_batch = (
+            torch.tensor([t_i], dtype=torch.float64).repeat(num_samples).to(device)
+        )
+        so3_traj, r3_traj = inference_step(model, so3_traj, r3_traj, t_batch, dt)
+
+    # Reshape SO3 output
+    final_so3 = so3_traj.reshape(num_samples, 3, 3)
+
+    return final_so3, r3_traj
