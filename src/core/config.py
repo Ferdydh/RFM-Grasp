@@ -157,7 +157,7 @@ class LoggingConfig:
             project_name="adlr",
             save_dir="logs",
             num_samples_to_visualize=2,
-            sample_every_n_epochs=1,
+            sample_every_n_epochs=10,
             log_every_n_steps=1,
             run_name=f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         )

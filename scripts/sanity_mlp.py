@@ -9,8 +9,10 @@ if __name__ == "__main__":
     config.data.sample_limit = 3  # 2 training, 1 validation
     config.data.batch_size = 512
 
-    config.early_stopping.patience = 1000
-    config.trainer.max_epochs = 10000
+    config.early_stopping.patience = 10
+    config.trainer.max_epochs = 100
+
+    config.logging.sample_every_n_epochs = 10
 
     # Initialize model
     model = pl_se3.FlowMatching(config)

@@ -182,3 +182,75 @@ def check_collision(
         scene = trimesh.Scene([object_mesh, gripper_mesh])
 
     return has_collision, scene, min_distance
+
+
+def check_collision_multiple_grasps(
+    rotation_matrix: torch.Tensor,
+    translation_vector: torch.Tensor,
+    object_mesh_path: str,
+    mesh_scale: float,
+) -> Tuple[bool, trimesh.Scene, float]:
+    """Checks for collisions between multiple gripper poses and object.
+
+    Args:
+        rotation_matrix: Batch of rotation matrices (batch_size, 3, 3)
+        translation_vector: Batch of translation vectors (batch_size, 3)
+        object_mesh_path: Path to object mesh file
+        mesh_scale: Scale factor for object mesh
+
+    Returns:
+        Tuple containing:
+        - bool: True if any gripper has collision
+        - trimesh.Scene: Scene with object and all gripper meshes
+        - float: Minimum distance across all gripper-object pairs
+    """
+    # Load and scale object mesh
+    object_mesh = trimesh.load(object_mesh_path)
+    object_mesh.apply_scale(mesh_scale)
+    object_mesh = enforce_trimesh(object_mesh)
+
+    # Create transformation matrix
+    batch_size = rotation_matrix.shape[0]
+    gripper_meshes = []
+    has_any_collision = False
+    min_distance_overall = float("inf")
+
+    for batch_idx in range(batch_size):
+        # Extract single sample from batch
+        so3_sample = rotation_matrix[batch_idx]
+        r3_sample = translation_vector[batch_idx]
+
+        gripper_transform = torch.eye(4)
+        gripper_transform[:3, :3] = so3_sample[:3, :3]
+        gripper_transform[:3, 3] = r3_sample.squeeze()
+        gripper_transform = gripper_transform.numpy()
+
+        # Create new gripper mesh for each sample
+        gripper_mesh = create_parallel_gripper_mesh(color=[0, 255, 0])
+        gripper_mesh.apply_transform(gripper_transform)
+
+        # Check collision
+        has_collision, min_distance = _check_mesh_collision(gripper_mesh, object_mesh)
+
+        # Update overall collision status and minimum distance
+        has_any_collision = has_any_collision or has_collision
+        min_distance_overall = min(min_distance_overall, min_distance)
+
+        # Update visualization color
+        color = [255, 0, 0] if has_collision else [0, 255, 0]
+        gripper_mesh.visual.face_colors = color
+
+        # Store the gripper mesh
+        gripper_meshes.append(gripper_mesh)
+
+    # Create visualization with all gripper meshes
+    if isinstance(object_mesh, trimesh.Scene):
+        scene = object_mesh
+        for gripper_mesh in gripper_meshes:
+            scene.add_geometry(gripper_mesh)
+    else:
+        # Convert list of meshes to include object and all grippers
+        all_meshes = [object_mesh] + gripper_meshes
+        scene = trimesh.Scene(all_meshes)
+
+    return has_any_collision, scene, min_distance_overall

@@ -9,7 +9,7 @@ import wandb
 from src.data.util import denormalize_translation
 
 from src.core.config import BaseExperimentConfig
-from src.core.visualize import check_collision
+from src.core.visualize import check_collision, check_collision_multiple_grasps
 from src.models.util import sample_location_and_conditional_flow, scene_to_wandb_image
 from src.models.fm_se3 import FM_SE3
 from src.models.wasserstein import wasserstein_distance
@@ -96,15 +96,21 @@ class FlowMatching(pl.LightningModule):
         """Forward pass through the model."""
         return self.se3fm.forward(so3_input, r3_input, t)
 
-    def _adjust_batch_size(self, so3_input: Tensor, r3_input: Tensor) -> Tuple[Tensor, Tensor]:
+    def _adjust_batch_size(
+        self, so3_input: Tensor, r3_input: Tensor
+    ) -> Tuple[Tensor, Tensor]:
         """Adjust batch size by repeating if necessary."""
-        if (so3_input.shape[0] < self.config.data.batch_size):
+        if so3_input.shape[0] < self.config.data.batch_size:
             repeat_factor = (self.config.data.batch_size // so3_input.shape[0]) + 1
-            so3_input = so3_input.repeat(repeat_factor, 1, 1)[:self.config.data.batch_size]
-            r3_input = r3_input.repeat(repeat_factor, 1)[:self.config.data.batch_size]
+            so3_input = so3_input.repeat(repeat_factor, 1, 1)[
+                : self.config.data.batch_size
+            ]
+            r3_input = r3_input.repeat(repeat_factor, 1)[: self.config.data.batch_size]
         return so3_input, r3_input
 
-    def _calculate_wasserstein_metrics(self, so3_input: Tensor, r3_input: Tensor) -> Dict[str, float]:
+    def _calculate_wasserstein_metrics(
+        self, so3_input: Tensor, r3_input: Tensor
+    ) -> Dict[str, float]:
         """Calculate Wasserstein distances between input and generated samples."""
         # Generate samples
         so3_output, r3_output = self.se3fm.sample(
@@ -113,37 +119,40 @@ class FlowMatching(pl.LightningModule):
 
         # Compute Wasserstein distances
         w_dist_so3 = wasserstein_distance(
-            so3_input, so3_output,
-            space="so3", method="exact", power=2
+            so3_input, so3_output, space="so3", method="exact", power=2
         )
         w_dist_r3 = wasserstein_distance(
-            r3_input, r3_output,
-            space="r3", method="exact", power=2
+            r3_input, r3_output, space="r3", method="exact", power=2
         )
 
-        return {
-            "wasserstein_so3": w_dist_so3,
-            "wasserstein_r3": w_dist_r3
-        }
+        return {"wasserstein_so3": w_dist_so3, "wasserstein_r3": w_dist_r3}
 
     def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
         """Training step implementation."""
         so3_input, r3_input, *_ = batch
-        so3_input_expanded, r3_input_expanded = self._adjust_batch_size(so3_input, r3_input)
-        
-        loss, log_dict = self.compute_loss(so3_input_expanded, r3_input_expanded, "train")
+        so3_input_expanded, r3_input_expanded = self._adjust_batch_size(
+            so3_input, r3_input
+        )
+
+        loss, log_dict = self.compute_loss(
+            so3_input_expanded, r3_input_expanded, "train"
+        )
 
         # Calculate Wasserstein distance every 100 epochs
         current_epoch = self.current_epoch
-        #TODO: make once each n epochs a parameter
-        #TODO: instead of using just a batch 
+        # TODO: make once each n epochs a parameter
+        # TODO: instead of using just a batch
         if current_epoch > 0 and current_epoch % 100 == 0:
             # creates config batch size amount of noise and compare the resulting points with them
-            wasserstein_metrics = self._calculate_wasserstein_metrics(so3_input, r3_input)
-            log_dict.update({
-                f"train/wasserstein_so3": wasserstein_metrics["wasserstein_so3"],
-                f"train/wasserstein_r3": wasserstein_metrics["wasserstein_r3"]
-            })
+            wasserstein_metrics = self._calculate_wasserstein_metrics(
+                so3_input, r3_input
+            )
+            log_dict.update(
+                {
+                    f"train/wasserstein_so3": wasserstein_metrics["wasserstein_so3"],
+                    f"train/wasserstein_r3": wasserstein_metrics["wasserstein_r3"],
+                }
+            )
 
         self.log_dict(
             log_dict,
@@ -157,7 +166,7 @@ class FlowMatching(pl.LightningModule):
         """Validation step implementation."""
         so3_input, r3_input, *_ = batch
 
-        #Repeat dataset until target batch size is obtained
+        # Repeat dataset until target batch size is obtained
         so3_input, r3_input = self._adjust_batch_size(so3_input, r3_input)
 
         with torch.enable_grad():
@@ -212,7 +221,7 @@ class FlowMatching(pl.LightningModule):
                 normalization_scale,
             ) = dataset[0]
 
-            r3_input = denormalize_translation(r3_input,norm_params)
+            r3_input = denormalize_translation(r3_input, norm_params)
             has_collision, scene, min_distance = check_collision(
                 so3_input,
                 r3_input,
@@ -236,7 +245,10 @@ class FlowMatching(pl.LightningModule):
                 }
             )
 
-    def on_train_end(self):
+    def on_train_epoch_end(self):
+        if self.current_epoch % self.config.logging.sample_every_n_epochs != 0:
+            return
+
         (
             so3_input,
             r3_input,
@@ -247,61 +259,41 @@ class FlowMatching(pl.LightningModule):
             normalization_scale,
         ) = self.trainer.train_dataloader.dataset[0]
 
-        print("Training end")
-
         # Generate samples
         so3_output, r3_output = self.se3fm.sample(
             r3_input.device, self.config.logging.num_samples_to_visualize
         )
 
-        #TODO maybe make this one line (It's not a requirement.)
+        # TODO maybe make this one line (It's not a requirement.)
         r3_output = denormalize_translation(r3_output, norm_params)
         r3_input = denormalize_translation(r3_input, norm_params)
 
         # Compute Wasserstein distances
         w_dist_so3 = wasserstein_distance(
-            so3_input.unsqueeze(0), so3_output,
-            space="so3", method="exact", power=2
+            so3_input.unsqueeze(0), so3_output, space="so3", method="exact", power=2
         )
         w_dist_r3 = wasserstein_distance(
-            r3_input.unsqueeze(0), r3_output,
-            space="r3", method="exact", power=2
+            r3_input.unsqueeze(0), r3_output, space="r3", method="exact", power=2
         )
 
         # Log Wasserstein distances
-        self.logger.experiment.log({
-            "val/wasserstein_distance_so3": w_dist_so3,
-            "val/wasserstein_distance_r3": w_dist_r3,
-        })
+        self.logger.experiment.log(
+            {
+                "val/wasserstein_distance_so3": w_dist_so3,
+                "val/wasserstein_distance_r3": w_dist_r3,
+            }
+        )
 
-        batch_size = so3_output.shape[0]  # Assuming first dimension is batch size
+        has_collision, scene, min_distance = check_collision_multiple_grasps(
+            so3_output,
+            r3_output,
+            mesh_path,
+            dataset_mesh_scale,
+        )
 
-        for batch_idx in range(batch_size):
-            # Extract single sample from batch
-            so3_sample = so3_output[batch_idx]  # Shape: (dim,)
-            r3_sample = r3_output[batch_idx]  # Shape: (dim,)
-
-            # Check collision for this sample
-            has_collision, scene, min_distance = check_collision(
-                so3_sample,
-                r3_sample,
-                mesh_path,
-                dataset_mesh_scale,
-            )
-
-            gripper_transform = torch.eye(4)
-            gripper_transform[:3, :3] = so3_sample[:3, :3]
-            gripper_transform[:3, 3] = r3_sample.squeeze()
-
-            gripper_transform = wandb.Table(
-                data=gripper_transform.cpu().numpy().tolist(),
-                columns=["rot1", "rot2", "rot3", "tr"],
-            )
-
-            # Log each sample's visualization
-            self.logger.experiment.log(
-                {
-                    f"val/generated_grasp_{batch_idx}": scene_to_wandb_image(scene),
-                    f"val/generated_grasp_{batch_idx}_transform": gripper_transform,
-                }
-            )
+        # Log each sample's visualization
+        self.logger.experiment.log(
+            {
+                "val/generated_grasp": scene_to_wandb_image(scene),
+            }
+        )
