@@ -38,12 +38,12 @@ class VelocityNetwork(nn.Module):
         """Forward pass computing velocities for both SO3 and R3 components.
 
         Args:
-            so3_input: SO3 input tensor [batch, 9] (flattened 3x3 matrices)
+            so3_input: SO3 input tensor [batch, 3, 3]
             r3_input: R3 input tensor [batch, 3]
             t: Time tensor [batch] or [batch, 1]
 
         Returns:
-            Tuple of (so3_velocity, r3_velocity)
+            Tuple of (so3_velocity [batch, 3, 3], r3_velocity [batch, 3])
         """
         # Ensure t is 2D [batch, 1]
         if t.dim() == 1:
@@ -51,8 +51,11 @@ class VelocityNetwork(nn.Module):
         elif t.dim() == 3:
             t = t.squeeze(1)
 
+        # Flatten SO3 input for processing
+        so3_flat = rearrange(so3_input, "b c d -> b (c d)")
+
         # Combine inputs
-        x = torch.cat([so3_input, r3_input], dim=-1)
+        x = torch.cat([so3_flat, r3_input], dim=-1)
 
         # Process time and state
         t_emb = self.time_proj(t)
@@ -66,16 +69,14 @@ class VelocityNetwork(nn.Module):
         combined_velocity = self.final(h)
 
         # Split outputs
-        so3_velocity = combined_velocity[:, :9]
+        so3_velocity_flat = combined_velocity[:, :9]
         r3_velocity = combined_velocity[:, 9:]
 
-        # Process SO3 velocity (project to tangent space)
-        x = rearrange(so3_input, "b (c d) -> b c d", c=3, d=3)
-        v = rearrange(so3_velocity, "b (c d) -> b c d", c=3, d=3)
+        # Reshape SO3 velocity back to matrix form for tangent space projection
+        so3_velocity = rearrange(so3_velocity_flat, "b (c d) -> b c d", c=3, d=3)
 
         # Project to tangent space
-        skew_symmetric_part = 0.5 * (v - v.permute(0, 2, 1))
-        Pv = x @ skew_symmetric_part
-        so3_velocity = rearrange(Pv, "b c d -> b (c d)", c=3, d=3)
+        skew_symmetric_part = 0.5 * (so3_velocity - so3_velocity.permute(0, 2, 1))
+        so3_velocity = so3_input @ skew_symmetric_part
 
         return so3_velocity, r3_velocity

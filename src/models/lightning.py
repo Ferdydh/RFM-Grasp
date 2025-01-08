@@ -50,16 +50,14 @@ class Lightning(pl.LightningModule):
         # Sample synchronized time points for both manifolds
         t = torch.rand(so3_inputs.shape[0], device=so3_inputs.device)
 
-        # SO3 computation
+        # SO3 computation - already in [batch, 3, 3] format
         x0_so3 = torch.tensor(
             Rotation.random(so3_inputs.size(0)).as_matrix(), device=so3_inputs.device
-        )
+        )  # Shape: [batch, 3, 3]
 
         # Sample location and flow for SO3
         xt_so3, ut_so3 = sample_location_and_conditional_flow(x0_so3, so3_inputs, t)
-
-        # Get velocity prediction for SO3
-        xt_flat = rearrange(xt_so3, "b c d -> b (c d)", c=3, d=3)
+        # Both xt_so3 and ut_so3 are [batch, 3, 3]
 
         # R3 computation with same time points
         t_expanded = t.unsqueeze(-1)  # [batch, 1]
@@ -70,9 +68,9 @@ class Lightning(pl.LightningModule):
             1 - (1 - self.config.model.sigma_min) * t_expanded
         ) * noise + t_expanded * r3_inputs
 
-        vt_so3, predicted_flow = self.forward(xt_flat, x_t_r3, t_expanded)
-
-        vt_so3 = rearrange(vt_so3, "b (c d) -> b c d", c=3, d=3)
+        # Forward pass now expects [batch, 3, 3] format
+        vt_so3, predicted_flow = self.model.forward(xt_so3, x_t_r3, t_expanded)
+        # vt_so3 is now directly [batch, 3, 3]
 
         # Compute SO3 loss using Riemannian metric
         r = torch.transpose(xt_so3, dim0=-2, dim1=-1) @ (vt_so3 - ut_so3)
@@ -81,7 +79,6 @@ class Lightning(pl.LightningModule):
 
         # Compute noisy sample and optimal flow for R3
         optimal_flow = r3_inputs - (1 - self.config.model.sigma_min) * noise
-
         r3_loss = F.mse_loss(predicted_flow, optimal_flow)
 
         total_loss = so3_loss + r3_loss
@@ -93,12 +90,6 @@ class Lightning(pl.LightningModule):
         }
 
         return total_loss, loss_dict
-
-    def forward(
-        self, so3_input: Tensor, r3_input: Tensor, t: Tensor
-    ) -> Tuple[Tensor, Tensor]:
-        """Forward pass through the model."""
-        return self.model.forward(so3_input, r3_input, t)
 
     def _adjust_batch_size(
         self, so3_input: Tensor, r3_input: Tensor

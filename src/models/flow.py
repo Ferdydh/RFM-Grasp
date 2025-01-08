@@ -134,7 +134,7 @@ def inference_step(
 
     Args:
         model: VelocityNetwork model
-        so3_state: Current SO3 state [batch, 9]
+        so3_state: Current SO3 state [batch, 3, 3]
         r3_state: Current R3 state [batch, 3]
         t: Current time [batch, 1]
         dt: Time step size [1]
@@ -142,20 +142,18 @@ def inference_step(
     Returns:
         Tuple of (next_so3_state, next_r3_state)
     """
-    # Get velocities
+    # Get velocities - model now expects [batch, 3, 3] input
     so3_velocity, r3_velocity = model(so3_state, r3_state, t)
 
-    # R3 update
+    # R3 update remains the same
     r3_next = r3_state + dt * r3_velocity
 
     # SO3 update with exponential map
-    so3_velocity = rearrange(so3_velocity, "b (c d) -> b c d", c=3, d=3)
-    so3_state = rearrange(so3_state, "b (c d) -> b c d", c=3, d=3)
+    # so3_velocity is already in [batch, 3, 3] format
     skew_sym = torch.einsum("...ij,...ik->...jk", so3_state, so3_velocity * dt)
     so3_next = torch.einsum(
         "...ij,...jk->...ik", so3_state, torch.linalg.matrix_exp(skew_sym)
     )
-    so3_next = rearrange(so3_next, "b c d -> b (c d)", c=3, d=3)
 
     return so3_next, r3_next
 
@@ -177,12 +175,11 @@ def sample(
             so3_samples: [num_samples, 3, 3]
             r3_samples: [num_samples, 3]
     """
-    # Initialize random starting points
-    so3_traj = (
-        torch.tensor(Rotation.random(num_samples).as_matrix(), dtype=torch.float64)
-        .reshape(-1, 9)
-        .to(device)
-    )
+    # Initialize random starting points - already in correct shape
+    so3_traj = torch.tensor(
+        Rotation.random(num_samples).as_matrix(), dtype=torch.float64
+    ).to(device)  # Shape: [num_samples, 3, 3]
+
     r3_traj = torch.randn(num_samples, 3, dtype=torch.float64).to(device)
 
     # Setup time steps
@@ -196,7 +193,5 @@ def sample(
         )
         so3_traj, r3_traj = inference_step(model, so3_traj, r3_traj, t_batch, dt)
 
-    # Reshape SO3 output
-    final_so3 = so3_traj.reshape(num_samples, 3, 3)
-
-    return final_so3, r3_traj
+    # No need to reshape SO3 output as it's already in the correct shape
+    return so3_traj, r3_traj
