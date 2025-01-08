@@ -207,6 +207,17 @@ class FlowMatching(pl.LightningModule):
 
     def on_train_start(self) -> None:
         """Setup logging of initial grasp scenes on training start."""
+        train_indices = set(self.trainer.train_dataloader.dataset.selected_indices)
+        val_indices = set(self.trainer.val_dataloaders.dataset.selected_indices)
+
+        print("Training data", train_indices)
+        print("Validation data", val_indices)
+
+        if train_indices & val_indices:
+            print(
+                "Warning: Overlapping indices found between training and validation sets."
+            )
+
         for prefix, dataset in [
             ("train", self.trainer.train_dataloader.dataset),
             ("val", self.trainer.val_dataloaders.dataset),

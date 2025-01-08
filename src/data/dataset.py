@@ -14,6 +14,7 @@ from src.data.util import NormalizationParams, normalize_translation
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class GraspDataset(Dataset):
     def __init__(
         self,
@@ -30,7 +31,7 @@ class GraspDataset(Dataset):
         # Process all grasp files
         self.grasp_entries = []
         total_grasps = 0
-        #TODO: Why does normalization works better check it.
+        # TODO: Why does normalization works better check it.
 
         for filename in grasp_files:
             entry = self.cache.get_or_process(filename, data_root, sdf_size)
@@ -38,9 +39,9 @@ class GraspDataset(Dataset):
             self.grasp_entries.append(
                 (filename, total_grasps, total_grasps + num_grasps)
             )
-                        # Calculate min/max for normalization
+            # Calculate min/max for normalization
             translations = entry.transforms[:, :3, 3]  # Get translation parts
-            if not hasattr(self, 'trans_min'):
+            if not hasattr(self, "trans_min"):
                 self.trans_min = translations.min(axis=0)
                 self.trans_max = translations.max(axis=0)
             else:
@@ -51,10 +52,9 @@ class GraspDataset(Dataset):
         self.total_grasps = total_grasps
 
         self.norm_params = NormalizationParams(
-            min=torch.tensor(self.trans_min),
-            max=torch.tensor(self.trans_max)
+            min=torch.tensor(self.trans_min), max=torch.tensor(self.trans_max)
         )
-        print("Calculated min_max values: ",self.trans_min,self.trans_max)
+        print("Calculated min_max values: ", self.trans_min, self.trans_max)
 
         # Sample if needed
         if num_samples and num_samples < self.total_grasps:
@@ -69,7 +69,9 @@ class GraspDataset(Dataset):
 
     def __getitem__(
         self, idx: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, str, float, float, NormalizationParams]:
+    ) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, str, float, float, NormalizationParams
+    ]:
         if self.selected_indices is not None:
             idx = self.selected_indices[idx]
 
@@ -84,7 +86,6 @@ class GraspDataset(Dataset):
         rotation = torch.tensor(entry.transforms[grasp_idx][:3, :3])
         translation = torch.tensor(entry.transforms[grasp_idx][:3, 3])
         normalized_translation = normalize_translation(translation, self.norm_params)
-
 
         return (
             rotation,
@@ -131,6 +132,7 @@ class DataModule(LightningDataModule):
 
             if train_size == len(full_dataset) or val_size == 0 or train_size == 0:
                 # This should only happen if we have sample_limit=1 or split_ratio=1.0
+                print("Using the same dataset for training and validation.")
                 self.train_dataset = full_dataset
                 self.val_dataset = full_dataset
             else:
