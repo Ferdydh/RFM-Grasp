@@ -5,9 +5,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader, dataset
 from typing import Optional, List, Tuple
 import logging
-from collections import namedtuple
 
-from src.core.config import BaseExperimentConfig
+from src.core.config import ExperimentConfig
 from src.data.data_manager import GraspCache
 from src.data.util import NormalizationParams, normalize_translation
 
@@ -101,7 +100,7 @@ class GraspDataset(Dataset):
 class DataModule(LightningDataModule):
     def __init__(
         self,
-        config: BaseExperimentConfig,
+        config: ExperimentConfig,
     ):
         super().__init__()
         self.config = config

@@ -8,7 +8,7 @@ from torch import Tensor
 import wandb
 from src.data.util import denormalize_translation
 
-from src.core.config import BaseExperimentConfig
+from src.core.config import ExperimentConfig
 from src.core.visualize import (
     check_collision,
     check_collision_multiple_grasps,
@@ -20,16 +20,15 @@ from src.models.velocity_mlp import VelocityNetwork
 from src.models.wasserstein import wasserstein_distance
 
 
-class FlowMatching(pl.LightningModule):
+class Lightning(pl.LightningModule):
     """Flow Matching model combining SO3 and R3 manifold learning with synchronized time sampling."""
 
-    def __init__(self, config: BaseExperimentConfig):
+    def __init__(self, config: ExperimentConfig):
         super().__init__()
         self.config = config
         self.model = VelocityNetwork()
 
         # TODO use config
-        self.sigma_min: float = 1e-4
         self.save_hyperparameters()
 
     def compute_loss(
@@ -68,7 +67,7 @@ class FlowMatching(pl.LightningModule):
 
         # Get predicted flow for R3
         x_t_r3 = (
-            1 - (1 - self.sigma_min) * t_expanded
+            1 - (1 - self.config.model.sigma_min) * t_expanded
         ) * noise + t_expanded * r3_inputs
 
         vt_so3, predicted_flow = self.forward(xt_flat, x_t_r3, t_expanded)
@@ -81,7 +80,7 @@ class FlowMatching(pl.LightningModule):
         so3_loss = torch.mean(norm, dim=-1)
 
         # Compute noisy sample and optimal flow for R3
-        optimal_flow = r3_inputs - (1 - self.sigma_min) * noise
+        optimal_flow = r3_inputs - (1 - self.config.model.sigma_min) * noise
 
         r3_loss = F.mse_loss(predicted_flow, optimal_flow)
 
@@ -190,23 +189,21 @@ class FlowMatching(pl.LightningModule):
         """Configure optimizers and learning rate schedulers."""
         optimizer = torch.optim.Adam(
             self.parameters(),
-            lr=self.config.optimizer.lr,
-            betas=tuple(self.config.optimizer.betas),
-            eps=self.config.optimizer.eps,
-            weight_decay=self.config.optimizer.weight_decay,
+            lr=self.config.training.learning_rate,
+            weight_decay=self.config.training.weight_decay,
         )
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=self.config.scheduler.T_max,
-            eta_min=self.config.scheduler.eta_min,
+            T_max=self.config.training.scheduler_steps,
+            eta_min=self.config.training.min_learning_rate,
         )
 
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": self.config.checkpoint.monitor,
+                "monitor": self.config.training.checkpoint_metric,
             },
         }
 
@@ -262,7 +259,7 @@ class FlowMatching(pl.LightningModule):
             )
 
     def on_train_epoch_end(self):
-        if self.current_epoch % self.config.logging.sample_every_n_epochs != 0:
+        if self.current_epoch % self.config.training.sample_interval != 0:
             return
 
         (
@@ -277,7 +274,7 @@ class FlowMatching(pl.LightningModule):
 
         # Generate samples
         so3_output, r3_output = sample(
-            self.model, r3_input.device, self.config.logging.num_samples_to_visualize
+            self.model, r3_input.device, self.config.training.num_samples_to_log
         )
 
         # TODO maybe make this one line (It's not a requirement.)

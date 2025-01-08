@@ -11,10 +11,7 @@ import atexit
 
 from src.data.dataset import DataModule
 
-from src.core.config import (
-    MLPExperimentConfig,
-    TransformerExperimentConfig,
-)
+from src.core.config import ExperimentConfig
 
 
 def cleanup_wandb():
@@ -27,7 +24,7 @@ def cleanup_wandb():
 
 def train(
     model: pl.LightningModule,
-    config: MLPExperimentConfig | TransformerExperimentConfig,
+    config: ExperimentConfig,
 ):
     """Train the autoencoder model with improved logging and visualization."""
     # Register cleanup function
@@ -36,10 +33,9 @@ def train(
     try:
         # Initialize WandB logger with modified settings
         wandb_logger = WandbLogger(
-            project=config.logging.project_name,
-            name=config.logging.run_name,
-            log_model=config.logging.log_model,
-            save_dir=config.logging.save_dir,
+            project=config.training.project_name,
+            name=config.training.run_name,
+            save_dir=config.training.save_dir,
             settings=wandb.Settings(start_method="thread"),
         )
 
@@ -51,12 +47,12 @@ def train(
 
         # Checkpoint callback
         checkpoint_callback = ModelCheckpoint(
-            dirpath=config.checkpoint.dirpath + "/" + config.logging.run_name,
-            filename=config.checkpoint.filename,
-            monitor=config.checkpoint.monitor,
-            mode=config.checkpoint.mode,
-            save_last=config.checkpoint.save_last,
-            save_top_k=config.checkpoint.save_top_k,
+            dirpath=config.training.checkpoint_dir + "/" + config.training.run_name,
+            filename=config.training.checkpoint_name,
+            monitor=config.training.checkpoint_metric,
+            mode=config.training.checkpoint_mode,
+            save_last=config.training.save_last,
+            save_top_k=config.training.keep_top_k_checkpoints,
         )
         callbacks.append(checkpoint_callback)
 
@@ -66,11 +62,11 @@ def train(
 
         # Early stopping callback
         early_stopping = EarlyStopping(
-            monitor=config.early_stopping.monitor,
-            min_delta=config.early_stopping.min_delta,
-            patience=config.early_stopping.patience,
+            monitor=config.training.checkpoint_metric,
+            min_delta=config.training.early_stop_min_delta,
+            patience=config.training.early_stop_patience,
             verbose=True,
-            mode=config.early_stopping.mode,
+            mode=config.training.checkpoint_mode,
             check_finite=True,  # Stop if loss becomes NaN or inf
         )
         callbacks.append(early_stopping)
@@ -79,18 +75,18 @@ def train(
         trainer = pl.Trainer(
             logger=wandb_logger,
             callbacks=callbacks,
-            max_epochs=config.trainer.max_epochs,
+            max_epochs=config.training.max_epochs,
             # accelerator="auto",
             # devices="auto",
             accelerator="cpu",
             devices=1,
             # TODO: fix this, try to use float32 instead
-            precision=config.trainer.precision,
-            gradient_clip_val=config.trainer.gradient_clip_val,
-            accumulate_grad_batches=config.trainer.accumulate_grad_batches,
+            precision=config.training.precision,
+            gradient_clip_val=config.training.gradient_clip_val,
+            accumulate_grad_batches=config.training.batch_accumulation,
             val_check_interval=1.0,
-            check_val_every_n_epoch=config.trainer.check_val_every_n_epoch,
-            log_every_n_steps=config.trainer.log_every_n_steps,
+            check_val_every_n_epoch=config.training.validation_interval,
+            log_every_n_steps=config.training.log_interval,
         )
 
         # Add this right before trainer.fit()

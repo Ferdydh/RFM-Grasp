@@ -1,11 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Tuple, Literal
+from typing import Optional, Union, Literal
 
 import torch
 
 
-# Base Configs
 @dataclass
 class BaseModelConfig:
     """Base configuration for all models"""
@@ -19,6 +18,7 @@ class MLPModelConfig(BaseModelConfig):
     output_dim: int
     hidden_dim: int
     z_dim: int
+    sigma_min: float = 1e-4
     activation = torch.nn.ReLU
 
     def __post_init__(self):
@@ -37,6 +37,8 @@ class MLPModelConfig(BaseModelConfig):
 
 @dataclass
 class TransformerModelConfig(BaseModelConfig):
+    sigma_min: float = 1e-4
+
     # TODO
     @classmethod
     def default(cls) -> "TransformerModelConfig":
@@ -74,220 +76,71 @@ class DataConfig:
             sampler_opt="repeat",
         )
 
-    # TODO: Add more data presets
-
-
-@dataclass
-class OptimizerConfig:
-    name: str
-    lr: float
-    betas: Tuple[float, float] = (0.9, 0.999)
-    weight_decay: float = 1e-5
-    eps: float = 1e-8
-
-    @classmethod
-    def default(cls) -> "OptimizerConfig":
-        return cls(
-            name="adamw",
-            lr=1e-4,
-            weight_decay=3e-9,
-        )
-
-
-@dataclass
-class SchedulerConfig:
-    name: str
-    T_max: Optional[int] = None
-    eta_min: Optional[float] = None
-
-    @classmethod
-    def cosine_default(cls) -> "SchedulerConfig":
-        return cls(
-            name="cosine",
-            T_max=1000,
-            eta_min=1e-6,
-        )
-
-
-@dataclass
-class TrainerConfig:
-    max_epochs: int
-    precision: Literal[16, 32, 64]
-    gradient_clip_val: float
-    accumulate_grad_batches: int
-    check_val_every_n_epoch: int
-    log_every_n_steps: int
-
-    @classmethod
-    def sanity(cls) -> "TrainerConfig":
-        return cls(
-            max_epochs=10,
-            precision=64,
-            gradient_clip_val=1.0,
-            accumulate_grad_batches=1,
-            check_val_every_n_epoch=5,
-            log_every_n_steps=1,
-        )
-
-    @classmethod
-    def default(cls) -> "TrainerConfig":
-        return cls(
-            max_epochs=100,
-            precision=64,
-            gradient_clip_val=1.0,
-            accumulate_grad_batches=1,
-            check_val_every_n_epoch=5,
-            log_every_n_steps=50,
-        )
-
-
-@dataclass
-class LoggingConfig:
-    project_name: str
-    save_dir: str
-    num_samples_to_visualize: int
-    sample_every_n_epochs: int
-    log_every_n_steps: int
-    run_name: Optional[str] = None
-    log_model: bool = False
-
-    @classmethod
-    def sanity(cls) -> "LoggingConfig":
-        return cls(
-            project_name="adlr",
-            save_dir="logs",
-            num_samples_to_visualize=2,
-            sample_every_n_epochs=10,
-            log_every_n_steps=1,
-            run_name=f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        )
-
-    @classmethod
-    def default(cls) -> "LoggingConfig":
-        return cls(
-            project_name="adlr",
-            save_dir="logs",
-            num_samples_to_visualize=2,
-            sample_every_n_epochs=50,
-            log_every_n_steps=50,
-            run_name=f"fm_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        )
-
-
-@dataclass
-class CheckpointConfig:
-    dirpath: str
-    filename: str
-    monitor: str
-    mode: Literal["min", "max"]
-    save_last: bool
-    save_top_k: int
-
-    @classmethod
-    def default(cls) -> "CheckpointConfig":
-        return cls(
-            dirpath="logs/checkpoints",
-            filename="fm-{epoch:02d}-{val_loss:.2f}",
-            monitor="val/loss",
-            mode="min",
-            save_last=True,
-            save_top_k=3,
-        )
-
-
-@dataclass
-class EarlyStoppingConfig:
-    monitor: str
-    min_delta: float
-    patience: int
-    mode: Literal["min", "max"]
-
-    @classmethod
-    def sanity(cls) -> "EarlyStoppingConfig":
-        return cls(
-            monitor="val/loss",
-            min_delta=1e-4,
-            patience=5,
-            mode="min",
-        )
-
-    @classmethod
-    def default(cls) -> "EarlyStoppingConfig":
-        return cls(
-            monitor="val/loss",
-            min_delta=1e-5,
-            patience=200,
-            mode="min",
-        )
-
 
 @dataclass
 class TrainingConfig:
-    """Contrastive learning configuration for transformer"""
+    """Consolidated training configuration"""
 
-    gamma: float
-    reduction: str
-    temperature: float
-    contrast: str
-    z_var_penalty: float
+    # Training parameters
+    max_epochs: int = 100
+    precision: Literal[16, 32, 64] = 32
+    batch_accumulation: int = 1
+    gradient_clip_val: float = 1.0
 
-    @classmethod
-    def default(cls) -> "TrainingConfig":
-        return cls(
-            gamma=0.05,
-            reduction="mean",
-            temperature=0.1,
-            contrast="simclr",
-            z_var_penalty=0.0,
-        )
+    # Optimizer & Scheduler
+    learning_rate: float = 1e-4
+    weight_decay: float = 3e-9
+    min_learning_rate: float = 1e-6
+    scheduler_steps: int = 1000
+
+    # Validation and Logging
+    validation_interval: int = 5
+    log_interval: int = 50
+    num_samples_to_log: int = 2
+    sample_interval: int = 50
+
+    # Checkpointing
+    checkpoint_dir: str = "logs/checkpoints"
+    checkpoint_name: str = "model-{epoch:02d}-{val_loss:.2f}"
+    checkpoint_metric: str = "val/loss"
+    checkpoint_mode: Literal["min", "max"] = "min"
+    keep_top_k_checkpoints: int = 3
+    save_last: bool = True
+
+    # Early Stopping
+    early_stop_patience: int = 200
+    early_stop_min_delta: float = 1e-5
+
+    # Project Metadata
+    project_name: str = "adlr"
+    run_name: Optional[str] = None
+    save_dir: str = "logs"
+
+    def __post_init__(self):
+        if self.run_name is None:
+            self.run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
 @dataclass
-class BaseExperimentConfig:
-    """Base configuration for all experiments"""
+class ExperimentConfig:
+    """Unified experiment configuration that works with any model type"""
 
     data: DataConfig
-    optimizer: OptimizerConfig
-    scheduler: SchedulerConfig
-    trainer: TrainerConfig
-    logging: LoggingConfig
-    checkpoint: CheckpointConfig
-    early_stopping: EarlyStoppingConfig
-
-
-@dataclass
-class MLPExperimentConfig(BaseExperimentConfig):
-    model: MLPModelConfig
-
-    @classmethod
-    def default(cls) -> "MLPExperimentConfig":
-        return cls(
-            data=DataConfig.sanity(),
-            model=MLPModelConfig.default(),
-            optimizer=OptimizerConfig.default(),
-            scheduler=SchedulerConfig.cosine_default(),
-            trainer=TrainerConfig.sanity(),
-            logging=LoggingConfig.sanity(),
-            checkpoint=CheckpointConfig.default(),
-            early_stopping=EarlyStoppingConfig.default(),
-        )
-
-
-@dataclass
-class TransformerExperimentConfig(BaseExperimentConfig):
-    model: TransformerModelConfig
+    model: Union[MLPModelConfig, TransformerModelConfig]
     training: TrainingConfig
 
     @classmethod
-    def default(cls) -> "TransformerExperimentConfig":
+    def default_mlp(cls) -> "ExperimentConfig":
+        return cls(
+            data=DataConfig.sanity(),
+            model=MLPModelConfig.default(),
+            training=TrainingConfig(),
+        )
+
+    @classmethod
+    def default_transformer(cls) -> "ExperimentConfig":
         return cls(
             data=DataConfig.sanity(),
             model=TransformerModelConfig.default(),
-            training=TrainingConfig.default(),
-            optimizer=OptimizerConfig.default(),
-            scheduler=SchedulerConfig.cosine_default(),
-            trainer=TrainerConfig.sanity(),
-            logging=LoggingConfig.sanity(),
-            checkpoint=CheckpointConfig.default(),
-            early_stopping=EarlyStoppingConfig.default(),
+            training=TrainingConfig(),
         )
