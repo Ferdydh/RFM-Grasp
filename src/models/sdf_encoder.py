@@ -1,4 +1,4 @@
-"""TODO: Not tested at all, just a rough draft"""
+"""TODO: Not tested at all, just a rough draft based on https://elib.dlr.de/197492/1/winkelbauer23_copyright.pdf"""
 
 import torch
 import torch.nn as nn
