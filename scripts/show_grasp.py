@@ -2,7 +2,7 @@ import torch
 from src.core.visualize import check_collision
 from src.data.dataset import GraspDataset
 from src.core.config import DataConfig
-from src.core.visualize import scene_to_wandb_image
+from src.core.visualize import scene_to_wandb_3d
 
 
 if __name__ == "__main__":

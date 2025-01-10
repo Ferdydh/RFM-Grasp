@@ -12,7 +12,7 @@ from src.core.config import ExperimentConfig
 from src.core.visualize import (
     check_collision,
     check_collision_multiple_grasps,
-    scene_to_wandb_image,
+    scene_to_wandb_3d,
 )
 from src.models.flow import sample, sample_location_and_conditional_flow
 
@@ -244,7 +244,7 @@ class Lightning(pl.LightningModule):
 
             self.logger.experiment.log(
                 {
-                    f"{prefix}/original_grasp": scene_to_wandb_image(scene),
+                    f"{prefix}/original_grasp": scene_to_wandb_3d(scene),
                     f"{prefix}/original_grasp_transform": gripper_transform,
                 }
             )
@@ -298,6 +298,6 @@ class Lightning(pl.LightningModule):
         # Log each sample's visualization
         self.logger.experiment.log(
             {
-                "val/generated_grasp": scene_to_wandb_image(scene),
+                "val/generated_grasp": scene_to_wandb_3d(scene),
             }
         )
