@@ -18,7 +18,8 @@ if __name__ == "__main__":
     (
         so3_input,
         r3_input,
-        sdf_input,
+        norm_params,
+        _,  # sdf_input
         mesh_path,
         dataset_mesh_scale,
         normalization_scale,
@@ -55,7 +56,9 @@ if __name__ == "__main__":
     print(f"Minimum Distance: {min_distance}")
 
     # Show the scene
-    scene.show()
+    # scene.show()
 
-    img = scene_to_wandb_image(scene)
-    img.image.show()
+    scene.export("logs/output.glb")
+
+    # img = scene_to_wandb_image(scene)
+    # img.image.show()

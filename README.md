@@ -25,6 +25,11 @@
    uv pip install -e .
    ```
 
+sudo apt-get install python3-opengl
+sudo apt-get install libgl1-mesa-glx
+
+if you open glb, you can open with glTF Model Viewer extension on vscode
+
 Save with this`uv add your_package`
 
 ## Dataset Information
