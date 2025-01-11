@@ -51,7 +51,7 @@ class DataConfig:
     files: list[str]
     sampler_opt: str
     batch_size: int = 32
-    num_workers: int = 4
+    num_workers: int = 1
     sample_limit: Optional[int] = None
     split_ratio: float = 0.9  # Train-Val split ratio of 90-10%
 

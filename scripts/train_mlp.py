@@ -1,8 +1,12 @@
-from src.core.config import DataConfig, ExperimentConfig
-from src.models import lightning
-from src.core.train import train
-
 if __name__ == "__main__":
+    from scripts import initialize
+
+    initialize()
+
+    from src.core.config import DataConfig, ExperimentConfig
+    from src.models import lightning
+    from src.core.train import train
+
     config: ExperimentConfig = ExperimentConfig.default_mlp()
     # config.data = DataConfig.small_one_file()
     config.data = DataConfig.sanity()

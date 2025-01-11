@@ -76,11 +76,8 @@ def train(
             logger=wandb_logger,
             callbacks=callbacks,
             max_epochs=config.training.max_epochs,
-            # accelerator="auto",
-            # devices="auto",
-            accelerator="cpu",
-            devices=1,
-            # TODO: fix this, try to use float32 instead
+            accelerator="auto",
+            devices="auto",
             precision=config.training.precision,
             gradient_clip_val=config.training.gradient_clip_val,
             accumulate_grad_batches=config.training.batch_accumulation,

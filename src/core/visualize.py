@@ -148,7 +148,7 @@ def check_collision(
     gripper_transform = torch.eye(4)
     gripper_transform[:3, :3] = rotation_matrix[:3, :3]
     gripper_transform[:3, 3] = translation_vector.squeeze()
-    gripper_transform = gripper_transform.numpy()
+    gripper_transform = gripper_transform.cpu().numpy()
 
     # Create and transform gripper mesh
     gripper_mesh = create_parallel_gripper_mesh(color=[0, 255, 0])
@@ -224,7 +224,7 @@ def check_collision_multiple_grasps(
         gripper_transform = torch.eye(4)
         gripper_transform[:3, :3] = so3_sample[:3, :3]
         gripper_transform[:3, 3] = r3_sample.squeeze()
-        gripper_transform = gripper_transform.numpy()
+        gripper_transform = gripper_transform.cpu().numpy()
 
         # Create new gripper mesh for each sample
         gripper_mesh = create_parallel_gripper_mesh(color=[0, 255, 0])

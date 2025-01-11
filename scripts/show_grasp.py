@@ -1,11 +1,24 @@
-import torch
-from src.core.visualize import check_collision
-from src.data.dataset import GraspDataset
-from src.core.config import DataConfig
-from src.core.visualize import scene_to_wandb_3d
-
-
 if __name__ == "__main__":
+    from scripts import initialize
+
+    initialize()
+
+    import torch
+    from src.core.visualize import check_collision
+    from src.data.dataset import GraspDataset
+    from src.core.config import DataConfig
+    from src.core.visualize import scene_to_wandb_3d
+
+    print(f"CUDA is available: {torch.cuda.is_available()}")
+
+    # If CUDA is available, you can also print additional information
+    if torch.cuda.is_available():
+        print(f"Current CUDA device: {torch.cuda.current_device()}")
+        print(f"Device name: {torch.cuda.get_device_name()}")
+        print(f"Device count: {torch.cuda.device_count()}")
+
+    exit()
+
     config = DataConfig.sanity()
 
     test = GraspDataset(

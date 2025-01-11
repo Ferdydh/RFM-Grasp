@@ -11,7 +11,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "einops" },
-    { name = "geomstats" },
+    { name = "geomstats", extra = ["pytorch"] },
     { name = "h5py" },
     { name = "mesh2sdf" },
     { name = "pot" },
@@ -26,7 +26,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "einops", specifier = ">=0.8.0" },
-    { name = "geomstats", specifier = ">=2.8.0" },
+    { name = "geomstats", extras = ["pytorch"], specifier = ">=2.8.0" },
     { name = "h5py", specifier = ">=3.12.1" },
     { name = "mesh2sdf", specifier = ">=1.1.0" },
     { name = "pot", specifier = ">=0.9.5" },
@@ -362,6 +362,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cc/d9/a99cd1b545d0ac3117bc6246e144755559a9a2fed734137db6ec214a083b/geomstats-2.8.0.tar.gz", hash = "sha256:d34df1ed96354859f694dfea2f58080d34f6e82bb0a5e49061d49ec213ef48a0", size = 9887212 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/16/2e/b8e0c53367d4a55338a4dd4e55cfcd560f5a5441f3906a106cee7cf9f1fb/geomstats-2.8.0-py3-none-any.whl", hash = "sha256:bd167c944586cb822c4cd6466fd70fc0819f6eb9a8c0e3de4971de4033ff4276", size = 10467124 },
+]
+
+[package.optional-dependencies]
+pytorch = [
+    { name = "torch" },
 ]
 
 [[package]]

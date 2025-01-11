@@ -22,9 +22,11 @@ class GraspDataset(Dataset):
         split: str = "train",
         num_samples: Optional[int] = None,
         sdf_size: int = 32,
+        device: torch.device = torch.device("cpu"),
     ):
         self.data_root = data_root
         self.sdf_size = sdf_size
+        self.device = device
         self.cache = GraspCache(os.path.join(data_root, "grasp_cache"))
 
         # Process all grasp files
@@ -82,8 +84,10 @@ class GraspDataset(Dataset):
         entry = self.cache.cache[filename]
         grasp_idx = idx - start_idx
 
-        rotation = torch.tensor(entry.transforms[grasp_idx][:3, :3])
-        translation = torch.tensor(entry.transforms[grasp_idx][:3, 3])
+        rotation = torch.tensor(entry.transforms[grasp_idx][:3, :3], device=self.device)
+        translation = torch.tensor(
+            entry.transforms[grasp_idx][:3, 3], device=self.device
+        )
         normalized_translation = normalize_translation(translation, self.norm_params)
 
         return (
@@ -112,6 +116,8 @@ class DataModule(LightningDataModule):
         self.num_samples = config.data.sample_limit
         self.split_ratio = config.data.split_ratio
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         if self.split_ratio < 0.5:
             print("Warning: Split ratio is less than 0.5.")
 
@@ -123,6 +129,7 @@ class DataModule(LightningDataModule):
                 self.data_root,
                 self.grasp_files,
                 num_samples=self.num_samples,
+                device=self.device,
             )
 
             # Calculate split sizes
@@ -146,6 +153,7 @@ class DataModule(LightningDataModule):
             shuffle=True,
             persistent_workers=True,
             num_workers=self.num_workers,
+            generator=torch.Generator(device=self.device),
         )
 
     def val_dataloader(self):
@@ -155,4 +163,5 @@ class DataModule(LightningDataModule):
             shuffle=False,
             persistent_workers=True,
             num_workers=self.num_workers,
+            generator=torch.Generator(device=self.device),
         )
