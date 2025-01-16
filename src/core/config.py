@@ -19,7 +19,9 @@ class MLPModelConfig(BaseModelConfig):
     hidden_dim: int
     z_dim: int
     sigma_min: float = 1e-4
-    activation = torch.nn.ReLU
+    activation = torch.nn.GELU#torch.nn.ReLU
+    num_hidden_layers: int = 6
+    voxel_output_size: int = 512
 
     def __post_init__(self):
         if self.z_dim >= self.hidden_dim:
@@ -28,9 +30,9 @@ class MLPModelConfig(BaseModelConfig):
     @classmethod
     def default(cls) -> "MLPModelConfig":
         return cls(
-            input_dim=1185,
-            output_dim=1185,
-            hidden_dim=1185,
+            input_dim=12,
+            output_dim=12,
+            hidden_dim=128,
             z_dim=64,
         )
 
@@ -83,7 +85,7 @@ class TrainingConfig:
 
     # Training parameters
     max_epochs: int = 100
-    precision: Literal[16, 32, 64] = 64
+    precision: Literal[16, 32, 64] = 32
     batch_accumulation: int = 1
     gradient_clip_val: float = 1.0
     r3_loss_weight: float = 3.0

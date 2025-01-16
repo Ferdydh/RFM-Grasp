@@ -15,8 +15,8 @@ if __name__ == "__main__":
     config.data.split_ratio = 1.0  # No validation set
     print(config.data.split_ratio)
     # config.data.sample_limit = 3  # 2 training, 1 validation
-    config.data.sample_limit = 100  # overfitting
-    config.data.batch_size = 8192
+    config.data.sample_limit = None# 100  # overfitting
+    config.data.batch_size = 256
 
     config.training.early_stop_patience = 100
     config.training.max_epochs = 20000

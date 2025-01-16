@@ -3,43 +3,38 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from einops import rearrange
-
+from src.models.sdf_encoder import VoxelSDFEncoder
 
 class VelocityNetwork(nn.Module):
     """Neural network for predicting the velocity field."""
 
-    def __init__(self, input_dim: int = 12, hidden_dim: int = 512):
+    def __init__(self, config,input_dim: int = 12, hidden_dim: int = 128):
         super().__init__()
 
-        activation = nn.GELU
-
+        activation = config.model.activation#nn.GELU
+        input_dim = config.model.input_dim#12
+        hidden_dim = config.model.hidden_dim#128
+        num_hidden_layers = config.model.num_hidden_layers#6
+        voxel_output_size = config.model.voxel_output_size#512
+        self.sdf_encoder = VoxelSDFEncoder(output_size=voxel_output_size).float()
         # Time embedding
         self.time_proj = nn.Sequential(nn.Linear(1, hidden_dim), activation())
 
         # Input projection
-        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        self.input_proj = nn.Linear(input_dim+voxel_output_size, hidden_dim)
 
         # Hidden layers
-        self.hidden_layers = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            activation(),
-            nn.Linear(hidden_dim, hidden_dim),
-            activation(),
-            nn.Linear(hidden_dim, hidden_dim),
-            activation(),
-            nn.Linear(hidden_dim, hidden_dim),
-            activation(),
-            nn.Linear(hidden_dim, hidden_dim),
-            activation(),
-            nn.Linear(hidden_dim, hidden_dim),
-            activation(),
-        )
+        layers = []
+        for _ in range(num_hidden_layers):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(activation())
+        self.hidden_layers = nn.Sequential(*layers)
 
         # Output projection
         self.final = nn.Linear(hidden_dim, input_dim)
 
     def forward(
-        self, so3_input: Tensor, r3_input: Tensor, t: Tensor
+        self, so3_input: Tensor, r3_input: Tensor,sdf_input:Tensor, t: Tensor
     ) -> Tuple[Tensor, Tensor]:
         """Forward pass computing velocities for both SO3 and R3 components.
 
@@ -56,12 +51,16 @@ class VelocityNetwork(nn.Module):
             t = t.unsqueeze(-1)
         elif t.dim() == 3:
             t = t.squeeze(1)
-
+        #print('Sdf input dim',sdf_input.shape,sdf_input.dtype)
+        sdf_features = self.sdf_encoder(sdf_input)
+        
+        sdf_features = sdf_features.repeat(so3_input.shape[0]//sdf_features.shape[0]+1,1)[:so3_input.shape[0]]
         # Flatten SO3 input for processing
         so3_flat = rearrange(so3_input, "b c d -> b (c d)")
-
+        #print(so3_input.shape,sdf_features.shape,so3_flat.shape)
+        
         # Combine inputs
-        x = torch.cat([so3_flat, r3_input], dim=-1)
+        x = torch.cat([sdf_features,so3_flat, r3_input], dim=-1)
 
         # Process time and state
         t_emb = self.time_proj(t)

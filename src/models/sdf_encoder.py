@@ -6,7 +6,7 @@ from einops import rearrange
 
 
 class VoxelSDFEncoder(nn.Module):
-    def __init__(self, input_size=48):
+    def __init__(self, input_size=32,output_size=512):
         super(VoxelSDFEncoder, self).__init__()
 
         # Define the convolutional encoder

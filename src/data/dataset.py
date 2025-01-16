@@ -21,7 +21,7 @@ class GraspDataset(Dataset):
         grasp_files: List[str],
         split: str = "train",
         num_samples: Optional[int] = None,
-        sdf_size: int = 32,
+        sdf_size: int = 48,
         device: torch.device = torch.device("cpu"),
     ):
         self.data_root = data_root
@@ -93,8 +93,8 @@ class GraspDataset(Dataset):
         return (
             rotation,
             normalized_translation,
-            self.norm_params,
             torch.tensor(entry.sdf),
+            self.norm_params,
             entry.mesh_path,
             entry.dataset_mesh_scale,
             entry.normalization_scale,
