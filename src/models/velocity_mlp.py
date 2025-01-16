@@ -8,10 +8,10 @@ from einops import rearrange
 class VelocityNetwork(nn.Module):
     """Neural network for predicting the velocity field."""
 
-    def __init__(self, input_dim: int = 12, hidden_dim: int = 32):
+    def __init__(self, input_dim: int = 12, hidden_dim: int = 512):
         super().__init__()
 
-        activation = nn.ReLU
+        activation = nn.GELU
 
         # Time embedding
         self.time_proj = nn.Sequential(nn.Linear(1, hidden_dim), activation())
@@ -21,6 +21,12 @@ class VelocityNetwork(nn.Module):
 
         # Hidden layers
         self.hidden_layers = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            activation(),
+            nn.Linear(hidden_dim, hidden_dim),
+            activation(),
+            nn.Linear(hidden_dim, hidden_dim),
+            activation(),
             nn.Linear(hidden_dim, hidden_dim),
             activation(),
             nn.Linear(hidden_dim, hidden_dim),

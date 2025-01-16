@@ -81,7 +81,8 @@ class Lightning(pl.LightningModule):
         optimal_flow = r3_inputs - (1 - self.config.model.sigma_min) * noise
         r3_loss = F.mse_loss(predicted_flow, optimal_flow)
 
-        total_loss = so3_loss + r3_loss
+        #Works better in this setup but we can change later
+        total_loss = self.config.training.so3_loss_weight*so3_loss + self.config.training.r3_loss_weight*r3_loss
 
         loss_dict = {
             f"{prefix}/so3_loss": so3_loss,

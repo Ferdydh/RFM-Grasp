@@ -83,9 +83,11 @@ class TrainingConfig:
 
     # Training parameters
     max_epochs: int = 100
-    precision: Literal[16, 32, 64] = 32
+    precision: Literal[16, 32, 64] = 64
     batch_accumulation: int = 1
     gradient_clip_val: float = 1.0
+    r3_loss_weight: float = 3.0
+    so3_loss_weight: float = 1.0
 
     # Optimizer & Scheduler
     learning_rate: float = 1e-4
@@ -94,10 +96,10 @@ class TrainingConfig:
     scheduler_steps: int = 1000
 
     # Validation and Logging
-    validation_interval: int = 5
+    validation_interval: int = 100
     log_interval: int = 50
-    num_samples_to_log: int = 2
-    sample_interval: int = 50
+    num_samples_to_log: int = 20
+    sample_interval: int = 100
 
     # Checkpointing
     checkpoint_dir: str = "logs/checkpoints"
