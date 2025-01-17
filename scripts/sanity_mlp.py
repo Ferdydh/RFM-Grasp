@@ -17,6 +17,7 @@ if __name__ == "__main__":
     # config.data.sample_limit = 3  # 2 training, 1 validation
     config.data.sample_limit = None# 100  # overfitting
     config.data.batch_size = 256
+    config.model.hidden_dim=512
 
     config.training.early_stop_patience = 100
     config.training.max_epochs = 20000

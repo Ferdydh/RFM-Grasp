@@ -22,9 +22,10 @@ class VelocityNetwork(nn.Module):
 
         # Input projection
         self.input_proj = nn.Linear(input_dim+voxel_output_size, hidden_dim)
-
+        #TODO Two linear layers back to back equivalent to one
         # Hidden layers
         layers = []
+        layers.append(activation())
         for _ in range(num_hidden_layers):
             layers.append(nn.Linear(hidden_dim, hidden_dim))
             layers.append(activation())

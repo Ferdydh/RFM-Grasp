@@ -30,16 +30,19 @@ class VoxelSDFEncoder(nn.Module):
         )
 
         # Calculate flattened size: after 4 MaxPool layers, spatial dims are reduced by 16
-        # Final shape will be (batch_size, 256, 3, 3, 3)
-        final_spatial_size = input_size // 16  # 48/16 = 3
-        flatten_size = 256 * (final_spatial_size**3)  # 256 * 3 * 3 * 3 = 6912
+        # Final shape will be (batch_size, 256, 3, 3, 3) #average the last 3 dimensions.
+        #final_spatial_size = input_size // 16  # 48/16 = 3
+        #Maybe average pooling, 256 in CNN instead of this 6912*512 layer -> so it will be 256*512
+        flatten_size = 256 # (final_spatial_size**3)  # 256 * 3 * 3 * 3 = 6912
 
+        self.avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
         # Linear layer to get to desired output size of 512
         self.fc = nn.Linear(flatten_size, 512)
 
     def forward(self, x):
         # Input shape: (batch_size, 1, 48, 48, 48)
         x = self.encoder(x)
+        x = self.avg_pool(x)
         # Flatten using einops: (batch, channels, depth, height, width) -> (batch, channels * depth * height * width)
         x = rearrange(x, "b c d h w -> b (c d h w)")
         # Project to 512 dimensions

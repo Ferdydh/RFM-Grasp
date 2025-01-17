@@ -20,7 +20,7 @@ class MLPModelConfig(BaseModelConfig):
     z_dim: int
     sigma_min: float = 1e-4
     activation = torch.nn.GELU#torch.nn.ReLU
-    num_hidden_layers: int = 6
+    num_hidden_layers: int = 3
     voxel_output_size: int = 512
 
     def __post_init__(self):
