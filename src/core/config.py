@@ -1,19 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Union, Literal
+from typing import Optional, Literal
 
 import torch
 
 
 @dataclass
-class BaseModelConfig:
-    """Base configuration for all models"""
-
-    pass
-
-
-@dataclass
-class MLPModelConfig(BaseModelConfig):
+class MLPModelConfig:
     input_dim: int
     output_dim: int
     hidden_dim: int
@@ -35,16 +28,6 @@ class MLPModelConfig(BaseModelConfig):
             hidden_dim=128,
             z_dim=64,
         )
-
-
-@dataclass
-class TransformerModelConfig(BaseModelConfig):
-    sigma_min: float = 1e-4
-
-    # TODO
-    @classmethod
-    def default(cls) -> "TransformerModelConfig":
-        return cls()
 
 
 @dataclass
@@ -130,7 +113,7 @@ class ExperimentConfig:
     """Unified experiment configuration that works with any model type"""
 
     data: DataConfig
-    model: Union[MLPModelConfig, TransformerModelConfig]
+    model: MLPModelConfig
     training: TrainingConfig
 
     @classmethod
@@ -138,13 +121,5 @@ class ExperimentConfig:
         return cls(
             data=DataConfig.sanity(),
             model=MLPModelConfig.default(),
-            training=TrainingConfig(),
-        )
-
-    @classmethod
-    def default_transformer(cls) -> "ExperimentConfig":
-        return cls(
-            data=DataConfig.sanity(),
-            model=TransformerModelConfig.default(),
             training=TrainingConfig(),
         )
