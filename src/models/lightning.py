@@ -1,3 +1,4 @@
+from models.util import duplicate_batch_to_size
 import torch.nn.functional as F
 from einops import rearrange
 from scipy.spatial.transform import Rotation
@@ -35,7 +36,7 @@ class Lightning(pl.LightningModule):
         self,
         so3_inputs: Tensor,
         r3_inputs: Tensor,
-        sdf_inputs:Tensor,
+        sdf_inputs: Tensor,
         prefix: str = "train",
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """Compute combined loss for both manifolds with synchronized time sampling.
@@ -70,7 +71,9 @@ class Lightning(pl.LightningModule):
         ) * noise + t_expanded * r3_inputs
 
         # Forward pass now expects [batch, 3, 3] format
-        vt_so3, predicted_flow = self.model.forward(xt_so3, x_t_r3,sdf_inputs, t_expanded)
+        vt_so3, predicted_flow = self.model.forward(
+            xt_so3, x_t_r3, sdf_inputs, t_expanded
+        )
         # vt_so3 is now directly [batch, 3, 3]
 
         # Compute SO3 loss using Riemannian metric
@@ -82,8 +85,11 @@ class Lightning(pl.LightningModule):
         optimal_flow = r3_inputs - (1 - self.config.model.sigma_min) * noise
         r3_loss = F.mse_loss(predicted_flow, optimal_flow)
 
-        #Works better in this setup but we can change later
-        total_loss = self.config.training.so3_loss_weight*so3_loss + self.config.training.r3_loss_weight*r3_loss
+        # Works better in this setup but we can change later
+        total_loss = (
+            self.config.training.so3_loss_weight * so3_loss
+            + self.config.training.r3_loss_weight * r3_loss
+        )
 
         loss_dict = {
             f"{prefix}/so3_loss": so3_loss,
@@ -93,70 +99,9 @@ class Lightning(pl.LightningModule):
 
         return total_loss, loss_dict
 
-    def _adjust_batch_size(
-        self, so3_input: Tensor, r3_input: Tensor,sdf_input:Tensor
-    ) -> Tuple[Tensor, Tensor]:
-        """Adjust batch size by repeating if necessary."""
-        #if sdf is something like batch_size,d,d,d make it batch_size,1,d,d,d
-        if sdf_input.dim() == 4:
-            sdf_input = sdf_input.unsqueeze(1)
-        if so3_input.shape[0] < self.config.data.batch_size:
-            repeat_factor = (self.config.data.batch_size // so3_input.shape[0]) + 1
-            so3_input = so3_input.repeat(repeat_factor, 1, 1)[
-                : self.config.data.batch_size
-            ]
-            r3_input = r3_input.repeat(repeat_factor, 1)[: self.config.data.batch_size]
-            #sdf_input = sdf_input.repeat(repeat_factor, 1,1,1,1)[: self.config.data.batch_size]
-        return so3_input, r3_input,sdf_input
-
-    def _calculate_wasserstein_metrics(
-        self, so3_input: Tensor, r3_input: Tensor
-    ) -> Dict[str, float]:
-        """Calculate Wasserstein distances between input and generated samples."""
-        # Generate samples
-        so3_output, r3_output = sample(
-            self.model, r3_input.device, num_samples=self.config.data.batch_size
-        )
-
-        # Compute Wasserstein distances
-        w_dist_so3 = wasserstein_distance(
-            so3_input, so3_output, space="so3", method="exact", power=2
-        )
-        w_dist_r3 = wasserstein_distance(
-            r3_input, r3_output, space="r3", method="exact", power=2
-        )
-
-        return {"wasserstein_so3": w_dist_so3, "wasserstein_r3": w_dist_r3}
-
     def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
-        """Training step implementation."""
-        so3_input, r3_input,sdf_input, *_ = batch
-        #print(sdf_input.shape)
-        so3_input_expanded, r3_input_expanded,sdf_input_expanded = self._adjust_batch_size(
-            so3_input, r3_input,sdf_input
-        )
-
-        loss, log_dict = self.compute_loss(
-            so3_input_expanded, r3_input_expanded,sdf_input_expanded, "train"
-        )
-
-        # Calculate Wasserstein distance every 100 epochs
-        #current_epoch = self.current_epoch
-        # TODO: instead of using just a batch
-        # Wasserstein will not be used for now.
-        
-        #We run this here because flow matching loss should be calculated as samples for training to see if we really learn
-        # if self.current_epoch > 0 and self.current_epoch % self.config.training.sample_interval == 0:
-        #     # creates config batch size amount of noise and compare the resulting points with them
-        #     wasserstein_metrics = self._calculate_wasserstein_metrics(
-        #         so3_input, r3_input
-        #     )
-        #     log_dict.update(
-        #         {
-        #             f"train/wasserstein_so3": wasserstein_metrics["wasserstein_so3"],
-        #             f"train/wasserstein_r3": wasserstein_metrics["wasserstein_r3"],
-        #         }
-        #     )
+        so3_input, r3_input, sdf_input, *_ = duplicate_batch_to_size(batch)
+        loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input, "train")
 
         self.log_dict(
             log_dict,
@@ -167,14 +112,10 @@ class Lightning(pl.LightningModule):
         return loss
 
     def validation_step(self, batch: Tuple, batch_idx: int) -> Dict[str, Tensor]:
-        """Validation step implementation."""
-        so3_input, r3_input, sdf_input,*_ = batch
-        #print(sdf_input.shape)
-        # Repeat dataset until target batch size is obtained
-        so3_input, r3_input,sdf_input = self._adjust_batch_size(so3_input, r3_input,sdf_input)
+        so3_input, r3_input, sdf_input, *_ = batch
 
         with torch.enable_grad():
-            loss, log_dict = self.compute_loss(so3_input, r3_input,sdf_input ,"val")
+            loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input, "val")
 
         # Log validation metrics
         self.log_dict(
@@ -266,18 +207,21 @@ class Lightning(pl.LightningModule):
         (
             so3_input,
             r3_input,
-            sdf_input, # sdf_input
+            sdf_input,  # sdf_input
             norm_params,
             mesh_path,
             dataset_mesh_scale,
             normalization_scale,
         ) = self.trainer.train_dataloader.dataset[random_idx]
-        #print('Initialtype',type(sdf_input))
+        # print('Initialtype',type(sdf_input))
         # Generate samples
         sdf_input = sdf_input.unsqueeze(0).unsqueeze(0)
-        #print(r3_input.shape)
+        # print(r3_input.shape)
         so3_output, r3_output = sample(
-            self.model,sdf_input, r3_input.device, self.config.training.num_samples_to_log
+            self.model,
+            sdf_input,
+            r3_input.device,
+            self.config.training.num_samples_to_log,
         )
 
         # TODO maybe make this one line (It's not a requirement.)

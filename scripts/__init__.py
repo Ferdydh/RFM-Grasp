@@ -9,7 +9,3 @@ def initialize():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.set_default_device(device)
     pl.seed_everything(42)
-
-    a = 0
-    print(a)
-    a += 1

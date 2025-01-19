@@ -1,56 +1,68 @@
-"""TODO: Not tested at all, just a rough draft based on https://elib.dlr.de/197492/1/winkelbauer23_copyright.pdf"""
-
 import torch
 import torch.nn as nn
 from einops import rearrange
 
 
 class VoxelSDFEncoder(nn.Module):
-    def __init__(self, input_size=32,output_size=512):
+    def __init__(self):
         super(VoxelSDFEncoder, self).__init__()
 
         # Define the convolutional encoder
         self.encoder = nn.Sequential(
             # First 3D Conv Block
+            # Input: (batch, 1, 48, 48, 48)
+            # After Conv3d: (batch, 32, 48, 48, 48)
             nn.Conv3d(in_channels=1, out_channels=32, kernel_size=3, padding=1),
             nn.ReLU(),
+            # After MaxPool3d: (batch, 32, 24, 24, 24)
             nn.MaxPool3d(kernel_size=2, stride=2),
             # Second 3D Conv Block
+            # After Conv3d: (batch, 64, 24, 24, 24)
             nn.Conv3d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
             nn.ReLU(),
+            # After MaxPool3d: (batch, 64, 12, 12, 12)
             nn.MaxPool3d(kernel_size=2, stride=2),
             # Third 3D Conv Block
+            # After Conv3d: (batch, 128, 12, 12, 12)
             nn.Conv3d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
             nn.ReLU(),
+            # After MaxPool3d: (batch, 128, 6, 6, 6)
             nn.MaxPool3d(kernel_size=2, stride=2),
             # Fourth 3D Conv Block
+            # After Conv3d: (batch, 256, 6, 6, 6)
             nn.Conv3d(in_channels=128, out_channels=256, kernel_size=3, padding=1),
             nn.ReLU(),
+            # After MaxPool3d: (batch, 256, 3, 3, 3)
             nn.MaxPool3d(kernel_size=2, stride=2),
         )
 
-        # Calculate flattened size: after 4 MaxPool layers, spatial dims are reduced by 16
-        # Final shape will be (batch_size, 256, 3, 3, 3) #average the last 3 dimensions.
-        #final_spatial_size = input_size // 16  # 48/16 = 3
-        #Maybe average pooling, 256 in CNN instead of this 6912*512 layer -> so it will be 256*512
-        flatten_size = 256 # (final_spatial_size**3)  # 256 * 3 * 3 * 3 = 6912
-
+        # Global Average Pooling to reduce spatial dimensions
+        # After AvgPool3d: (batch, 256, 1, 1, 1)
         self.avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
-        # Linear layer to get to desired output size of 512
-        self.fc = nn.Linear(flatten_size, 512)
 
     def forward(self, x):
+        # Add batch dimension if needed
+        if x.dim() == 4:
+            x = x.unsqueeze(0)
+
+        # Validate input shape
+        assert x.shape[-4:] == torch.Size([1, 48, 48, 48]), (
+            f"Expected shape (..., 1, 48, 48, 48), got {x.shape}"
+        )
+
         # Input shape: (batch_size, 1, 48, 48, 48)
         x = self.encoder(x)
+        # Shape after encoder: (batch_size, 256, 3, 3, 3)
+
         x = self.avg_pool(x)
-        # Flatten using einops: (batch, channels, depth, height, width) -> (batch, channels * depth * height * width)
+        # Shape after avg_pool: (batch_size, 256, 1, 1, 1)
+
+        # Flatten using einops: (batch, channels, 1, 1, 1) -> (batch, channels)
         x = rearrange(x, "b c d h w -> b (c d h w)")
-        # Project to 512 dimensions
-        x = self.fc(x)
+        # Shape after flatten: (batch_size, 256)
         return x
 
 
-# Example usage:
 if __name__ == "__main__":
     # Create a sample input tensor
     batch_size = 4
@@ -63,4 +75,4 @@ if __name__ == "__main__":
     output = model(input_tensor)
 
     print(f"Input shape: {input_tensor.shape}")
-    print(f"Output shape: {output.shape}")  # Should be (batch_size, 512)
+    print(f"Output shape: {output.shape}")  # Will be (batch_size, 256)

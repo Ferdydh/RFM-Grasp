@@ -10,15 +10,10 @@ class MLPModelConfig:
     input_dim: int
     output_dim: int
     hidden_dim: int
-    z_dim: int
     sigma_min: float = 1e-4
-    activation = torch.nn.GELU#torch.nn.ReLU
+    activation = torch.nn.ReLU
     num_hidden_layers: int = 3
-    voxel_output_size: int = 512
-
-    def __post_init__(self):
-        if self.z_dim >= self.hidden_dim:
-            raise ValueError("z_dim must be smaller than hidden_dim")
+    voxel_output_size: int = 256
 
     @classmethod
     def default(cls) -> "MLPModelConfig":
@@ -26,7 +21,6 @@ class MLPModelConfig:
             input_dim=12,
             output_dim=12,
             hidden_dim=128,
-            z_dim=64,
         )
 
 

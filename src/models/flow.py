@@ -128,7 +128,12 @@ def sample_location_and_conditional_flow(x0, x1, t):
 
 @torch.no_grad()
 def inference_step(
-    model: VelocityNetwork, so3_state: Tensor, r3_state: Tensor,sdf_input:Tensor, t: Tensor, dt: Tensor
+    model: VelocityNetwork,
+    so3_state: Tensor,
+    r3_state: Tensor,
+    sdf_input: Tensor,
+    t: Tensor,
+    dt: Tensor,
 ) -> Tuple[Tensor, Tensor]:
     """Single step inference.
 
@@ -143,7 +148,7 @@ def inference_step(
         Tuple of (next_so3_state, next_r3_state)
     """
     # Get velocities - model now expects [batch, 3, 3] input
-    so3_velocity, r3_velocity = model(so3_state, r3_state,sdf_input, t)
+    so3_velocity, r3_velocity = model(so3_state, r3_state, sdf_input, t)
 
     # R3 update remains the same
     r3_next = r3_state + dt * r3_velocity
@@ -160,7 +165,11 @@ def inference_step(
 
 @torch.no_grad()
 def sample(
-    model: VelocityNetwork,sdf_input: Tensor, device: torch.device, num_samples: int = 1, steps: int = 200
+    model: VelocityNetwork,
+    sdf_input: Tensor,
+    device: torch.device,
+    num_samples: int = 1,
+    steps: int = 200,
 ) -> Tuple[Tensor, Tensor]:
     """Generate samples.
 
@@ -191,7 +200,9 @@ def sample(
         t_batch = (
             torch.tensor([t_i], dtype=torch.float64).repeat(num_samples).to(device)
         )
-        so3_traj, r3_traj = inference_step(model, so3_traj, r3_traj,sdf_input, t_batch, dt)
+        so3_traj, r3_traj = inference_step(
+            model, so3_traj, r3_traj, sdf_input, t_batch, dt
+        )
 
     # No need to reshape SO3 output as it's already in the correct shape
     return so3_traj, r3_traj
