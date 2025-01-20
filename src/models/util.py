@@ -6,7 +6,7 @@ def duplicate_batch_to_size(batch):
     Duplicates elements in a batch until it reaches the target batch size.
     Works with tensors, dictionaries, tuples, strings, and basic types.
     """
-    target_batch_size = 128
+    target_batch_size = 256
     # Handle basic types (str, int, float) by just returning them as is
     if isinstance(batch, (str, int, float)):
         return batch

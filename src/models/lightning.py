@@ -2,13 +2,15 @@ from models.util import duplicate_batch_to_size
 import torch.nn.functional as F
 from einops import rearrange
 from scipy.spatial.transform import Rotation
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict
 import pytorch_lightning as pl
 import torch
 from torch import Tensor
 import wandb
-from src.data.util import denormalize_translation
+from torch.utils.data import DataLoader
 
+
+from src.data.util import denormalize_translation
 from src.core.config import ExperimentConfig
 from src.core.visualize import (
     check_collision,
@@ -16,7 +18,6 @@ from src.core.visualize import (
     scene_to_wandb_3d,
 )
 from src.models.flow import sample, sample_location_and_conditional_flow
-
 from src.models.velocity_mlp import VelocityNetwork
 from src.models.wasserstein import wasserstein_distance
 
@@ -249,7 +250,7 @@ class Lightning(pl.LightningModule):
             self.logger.experiment.log(
                 {
                     f"{prefix}/original_grasp": scene_to_wandb_3d(scene),
-                    f"{prefix}/original_grasp_transform": gripper_transform,
+                    # f"{prefix}/original_grasp_transform": gripper_transform,
                 }
             )
 
