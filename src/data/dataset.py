@@ -142,10 +142,11 @@ class DataModule(LightningDataModule):
                 self.train_dataset = full_dataset
                 self.val_dataset = full_dataset
             else:
-                #TODO: When it becomes a Subset it fails.
+                # TODO: When it becomes a Subset it fails.
                 self.train_dataset, self.val_dataset = dataset.random_split(
-                    full_dataset, [train_size, val_size],
-                    #generator=torch.Generator(device="cuda")
+                    full_dataset,
+                    [train_size, val_size],
+                    generator=torch.Generator(device=self.device),
                 )
 
     def train_dataloader(self):

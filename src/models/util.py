@@ -6,8 +6,7 @@ def duplicate_batch_to_size(batch):
     Duplicates elements in a batch until it reaches the target batch size.
     Works with tensors, dictionaries, tuples, strings, and basic types.
     """
-    target_batch_size = 2048
-
+    target_batch_size = 128
     # Handle basic types (str, int, float) by just returning them as is
     if isinstance(batch, (str, int, float)):
         return batch
@@ -19,19 +18,18 @@ def duplicate_batch_to_size(batch):
 
         current_size = batch.size(0)
         if current_size >= target_batch_size:
-            return batch[:target_batch_size]
+            raise RuntimeError(
+                "Current batch size is already larger than target size, this is not acceptable"
+            )
 
         # Calculate how many full copies we need and the remainder
         num_copies = target_batch_size // current_size
         remainder = target_batch_size % current_size
 
-        # For the SDF tensor (which should have shape [1, 48, 48, 48]),
-        # we want to expand along a new dimension
-        if batch.shape[-4:] == torch.Size([1, 48, 48, 48]):
-            # First reshape to [1, 1, 48, 48, 48]
-            batch = batch.unsqueeze(0)
-            # Then expand to [target_batch_size, 1, 48, 48, 48]
-            duplicated = batch.expand(target_batch_size, *batch.shape[1:])
+        # For the SDF tensor (which should have shape [48, 48, 48]),
+        if batch.shape == torch.Size([48, 48, 48]):
+            # Expand to [target_batch_size, 48, 48, 48]
+            duplicated = batch.unsqueeze(0).expand(target_batch_size, 48, 48, 48)
             return duplicated
         else:
             # For other tensors, use normal duplication

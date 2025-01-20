@@ -126,34 +126,87 @@ class Lightning(pl.LightningModule):
 
         return log_dict
 
-    def configure_optimizers(self) -> Dict[str, Any]:
-        """Configure optimizers and learning rate schedulers."""
-        optimizer = torch.optim.Adam(
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.config.training.learning_rate,
+            betas=tuple(self.config.training.adamw_betas),
+            eps=self.config.training.epsilon,
             weight_decay=self.config.training.weight_decay,
         )
 
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        total_steps = self.trainer.estimated_stepping_batches
+
+        # Single linear scheduler with warmup
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
-            T_max=self.config.training.scheduler_steps,
-            eta_min=self.config.training.min_learning_rate,
+            max_lr=self.config.training.learning_rate,
+            total_steps=total_steps,
+            pct_start=self.config.training.warmup_ratio,
+            anneal_strategy="linear",
+            div_factor=3.0,  # initial_lr = max_lr/div_factor
+            final_div_factor=float("inf"),  # final_lr = initial_lr/final_div_factor
         )
 
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
                 "monitor": self.config.training.checkpoint_metric,
             },
         }
 
     def on_train_start(self) -> None:
         """Setup logging of initial grasp scenes on training start."""
-        if self.trainer.train_dataloader.dataset.selected_indices:
-            train_indices = set(self.trainer.train_dataloader.dataset.selected_indices)
-            val_indices = set(self.trainer.val_dataloaders.dataset.selected_indices)
+        train_dataset = self.trainer.train_dataloader.dataset
+        val_dataset = self.trainer.val_dataloaders.dataset
 
+        # Get base datasets (handle Subset case)
+        train_base = (
+            train_dataset.dataset
+            if isinstance(train_dataset, torch.utils.data.Subset)
+            else train_dataset
+        )
+        val_base = (
+            val_dataset.dataset
+            if isinstance(val_dataset, torch.utils.data.Subset)
+            else val_dataset
+        )
+
+        # First get selected_indices from the base dataset if they exist
+        base_selected = (
+            train_base.selected_indices
+            if hasattr(train_base, "selected_indices")
+            else None
+        )
+
+        # Then get the actual split indices from Subset
+        if isinstance(train_dataset, torch.utils.data.Subset):
+            train_indices = set(
+                train_dataset.indices
+            )  # These are indices into the base dataset
+            val_indices = set(val_dataset.indices)
+
+            # If base dataset had selected_indices, we need to map through them
+            if base_selected is not None:
+                train_indices = set(base_selected[i] for i in train_indices)
+                val_indices = set(base_selected[i] for i in val_indices)
+        else:
+            # If not a subset, use selected_indices directly if they exist
+            train_indices = (
+                set(train_base.selected_indices)
+                if hasattr(train_base, "selected_indices")
+                else None
+            )
+            val_indices = (
+                set(val_base.selected_indices)
+                if hasattr(val_base, "selected_indices")
+                else None
+            )
+
+        if train_indices is not None and val_indices is not None:
             print("Training data", train_indices)
             print("Validation data", val_indices)
 
@@ -215,7 +268,8 @@ class Lightning(pl.LightningModule):
         ) = self.trainer.train_dataloader.dataset[random_idx]
         # print('Initialtype',type(sdf_input))
         # Generate samples
-        sdf_input = sdf_input.unsqueeze(0).unsqueeze(0)
+        sdf_input = rearrange(sdf_input, "... -> 1 1 ...")
+
         # print(r3_input.shape)
         so3_output, r3_output = sample(
             self.model,

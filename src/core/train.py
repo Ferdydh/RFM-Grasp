@@ -83,7 +83,7 @@ def train(
             accumulate_grad_batches=config.training.batch_accumulation,
             val_check_interval=1.0,
             check_val_every_n_epoch=config.training.validation_interval,
-            log_every_n_steps=config.training.log_interval,
+            log_every_n_steps=1,
         )
 
         # Add this right before trainer.fit()

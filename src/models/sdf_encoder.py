@@ -10,9 +10,11 @@ class VoxelSDFEncoder(nn.Module):
         # Define the convolutional encoder
         self.encoder = nn.Sequential(
             # First 3D Conv Block
-            # Input: (batch, 1, 48, 48, 48)
+            # Input: (batch, 1, 48, 48, 48)  # Changed to accept 1 input channel
             # After Conv3d: (batch, 32, 48, 48, 48)
-            nn.Conv3d(in_channels=1, out_channels=32, kernel_size=3, padding=1),
+            nn.Conv3d(
+                in_channels=1, out_channels=32, kernel_size=3, padding=1
+            ),  # Changed in_channels to 1
             nn.ReLU(),
             # After MaxPool3d: (batch, 32, 24, 24, 24)
             nn.MaxPool3d(kernel_size=2, stride=2),
@@ -42,8 +44,10 @@ class VoxelSDFEncoder(nn.Module):
 
     def forward(self, x):
         # Add batch dimension if needed
+        if x.dim() == 3:
+            x = x.unsqueeze(0)  # Add batch dimension
         if x.dim() == 4:
-            x = x.unsqueeze(0)
+            x = x.unsqueeze(1)  # Add channel dimension
 
         # Validate input shape
         assert x.shape[-4:] == torch.Size([1, 48, 48, 48]), (
@@ -66,7 +70,7 @@ class VoxelSDFEncoder(nn.Module):
 if __name__ == "__main__":
     # Create a sample input tensor
     batch_size = 4
-    input_tensor = torch.randn(batch_size, 1, 48, 48, 48)
+    input_tensor = torch.randn(batch_size, 1, 48, 48, 48)  # Updated test input shape
 
     # Initialize the model
     model = VoxelSDFEncoder()

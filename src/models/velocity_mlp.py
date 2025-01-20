@@ -46,6 +46,7 @@ class VelocityNetwork(nn.Module):
         Args:
             so3_input: SO3 input tensor [batch, 3, 3]
             r3_input: R3 input tensor [batch, 3]
+            sdf_input: SDF input tensor [batch, 48, 48, 48]
             t: Time tensor [batch] or [batch, 1]
 
         Returns:

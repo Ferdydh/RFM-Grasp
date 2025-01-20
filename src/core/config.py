@@ -73,10 +73,12 @@ class TrainingConfig:
     weight_decay: float = 3e-9
     min_learning_rate: float = 1e-6
     scheduler_steps: int = 1000
+    adamw_betas: tuple[float, float] = (0.9, 0.999)
+    epsilon: float = 1e-8
+    warmup_ratio: float = 0.1
 
     # Validation and Logging
     validation_interval: int = 100
-    log_interval: int = 50
     num_samples_to_log: int = 20
     sample_interval: int = 100
 
