@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Literal
 
+
+
+
+
 import torch
 
 
@@ -66,7 +70,20 @@ class DataConfig:
             split_ratio=0.8,
             sampler_opt="repeat",
         )
+    
 
+    @classmethod
+    def random_h5(cls) -> "DataConfig":
+        # random.seed(42)  # Fix the seed for reproducibility
+        # all_h5 = list(glob("data/grasps/*.h5"))
+        # random.shuffle(all_h5)
+        # selected = all_h5[:100]
+        return cls(
+            data_path="data/",
+            files=50,
+            batch_size=8,
+            sampler_opt="repeat",
+        )
 
 @dataclass
 class TrainingConfig:

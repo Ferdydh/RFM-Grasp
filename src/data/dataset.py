@@ -1,10 +1,12 @@
 from pytorch_lightning import LightningDataModule
 import os
+from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, dataset
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 import logging
+import random
 
 from src.core.config import ExperimentConfig
 from src.data.data_manager import GraspCache
@@ -18,7 +20,7 @@ class GraspDataset(Dataset):
     def __init__(
         self,
         data_root: str,
-        grasp_files: List[str],
+        grasp_files: Union[List[str], int],
         split: str = "train",
         num_samples: Optional[int] = None,
         sdf_size: int = 48,
@@ -33,15 +35,28 @@ class GraspDataset(Dataset):
         self.grasp_entries = []
         total_grasps = 0
         # TODO: Why does normalization works better check it.
-
+        if isinstance(grasp_files, int):
+            # Perform globbing to get all .h5 files
+            all_h5 = list(Path(self.data_root, "grasps").glob("*.h5"))
+            random.seed(42)  # Fix the seed for reproducibility
+            random.shuffle(all_h5)
+            selected_files = all_h5[:grasp_files]
+            # Extract only the filenames
+            grasp_files = [f.name for f in selected_files]
+        else:
+            grasp_files = grasp_files
+        
+        #print("Grasp files: ", grasp_files)
         for filename in grasp_files:
             entry = self.cache.get_or_process(filename, data_root, sdf_size)
+            if  entry is None:
+                continue
             num_grasps = len(entry.transforms)
             self.grasp_entries.append(
                 (filename, total_grasps, total_grasps + num_grasps)
             )
             # Calculate min/max for normalization
-            translations = entry.transforms[:, :3, 3]  # Get translation parts
+            translations = entry.transforms[:, :3, 3] 
             if not hasattr(self, "trans_min"):
                 self.trans_min = translations.min(axis=0)
                 self.trans_max = translations.max(axis=0)

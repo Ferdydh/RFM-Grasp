@@ -4,14 +4,14 @@ if __name__ == "__main__":
     initialize()
 
     from src.core.config import DataConfig, ExperimentConfig
-    from src.models import lightning
+    from src.models.lightning  import Lightning
     from src.core.train import train
 
     config: ExperimentConfig = ExperimentConfig.default_mlp()
-    config.data = DataConfig.two_files()
+    config.data = DataConfig.random_h5()
     config.data.split_ratio = 0.9
     config.data.num_workers = 3
-
+    print(config.data.files)
     # ---------------------
 
     # Sanity with 1
@@ -55,6 +55,9 @@ if __name__ == "__main__":
     config.training.sample_interval = 100
 
     # Initialize model
-    model = lightning.Lightning(config)
-
+    
+    model = Lightning.load_from_checkpoint(
+    checkpoint_path="logs/checkpoints/run_20250123_035011/model-epoch=11799-val_loss=0.00.ckpt",
+    config=config,  
+    )
     train(model, config)

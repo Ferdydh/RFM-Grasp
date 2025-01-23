@@ -3,11 +3,11 @@ import logging
 import os
 from pathlib import Path
 import pickle
-
+import sys
 import h5py
 import numpy as np
 import trimesh
-
+from typing import Optional
 from src.data.util import enforce_trimesh, process_mesh_to_sdf
 
 logging.basicConfig(level=logging.INFO)
@@ -43,13 +43,14 @@ class GraspCache:
 
     def get_or_process(
         self, grasp_filename: str, data_root: str, sdf_size: int
-    ) -> GraspCacheEntry:
+    ) -> Optional[GraspCacheEntry]:
         """Get cached data or process and cache if not available."""
         if grasp_filename in self.cache:
             logger.info(f"Loading {grasp_filename} from cache")
             return self.cache[grasp_filename]
 
         logger.info(f"Processing {grasp_filename}")
+        
         grasp_file = os.path.join(data_root, "grasps", grasp_filename)
 
         with h5py.File(grasp_file, "r") as h5file:
@@ -61,7 +62,8 @@ class GraspCache:
                 :
             ]
             transforms = transforms[grasp_success == 1]
-
+            if transforms.size == 0:
+                return None
         # Load and process mesh
         mesh_path = os.path.join(data_root, mesh_fname)
         mesh = trimesh.load(mesh_path)
