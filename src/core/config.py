@@ -54,6 +54,18 @@ class DataConfig:
             split_ratio=0.8,
             sampler_opt="repeat",
         )
+        
+    @classmethod
+    def two_files(cls) -> "DataConfig":
+        return cls(
+            data_path="data/",
+            files=["Xbox360_14e5dba73b283dc7fe0939859a0b15ea_0.0005312646125977.h5",
+                   "Bowl_6c3bf99a9534c75314513156cf2b8d0d_0.011015409147693228.h5"],
+            batch_size=8,
+            sample_limit=10,
+            split_ratio=0.8,
+            sampler_opt="repeat",
+        )
 
 
 @dataclass

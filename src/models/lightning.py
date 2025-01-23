@@ -38,6 +38,7 @@ class Lightning(pl.LightningModule):
         so3_inputs: Tensor,
         r3_inputs: Tensor,
         sdf_inputs: Tensor,
+        sdf_path: Tuple[str],
         prefix: str = "train",
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """Compute combined loss for both manifolds with synchronized time sampling.
@@ -51,14 +52,17 @@ class Lightning(pl.LightningModule):
             Tuple of (total_loss, loss_dict)
         """
         # Sample synchronized time points for both manifolds
-        t = torch.rand(so3_inputs.shape[0], device=so3_inputs.device)
+        
+        so3_inputs = self.model.duplicate_to_batch_size(so3_inputs,self.config.data.batch_size)
+        r3_inputs = self.model.duplicate_to_batch_size(r3_inputs,self.config.data.batch_size)
+        t = torch.rand(self.config.data.batch_size, device=so3_inputs.device)
 
         # SO3 computation - already in [batch, 3, 3] format
         x0_so3 = torch.tensor(
-            Rotation.random(so3_inputs.size(0)).as_matrix(), device=so3_inputs.device
+            Rotation.random(self.config.data.batch_size).as_matrix(), device=so3_inputs.device
         )  # Shape: [batch, 3, 3]
 
-        # Sample location and flow for SO3
+        # Sample location and flow for SO
         xt_so3, ut_so3 = sample_location_and_conditional_flow(x0_so3, so3_inputs, t)
         # Both xt_so3 and ut_so3 are [batch, 3, 3]
 
@@ -73,7 +77,7 @@ class Lightning(pl.LightningModule):
 
         # Forward pass now expects [batch, 3, 3] format
         vt_so3, predicted_flow = self.model.forward(
-            xt_so3, x_t_r3, sdf_inputs, t_expanded
+            xt_so3, x_t_r3, sdf_inputs, t_expanded,sdf_path
         )
         # vt_so3 is now directly [batch, 3, 3]
 
@@ -101,8 +105,8 @@ class Lightning(pl.LightningModule):
         return total_loss, loss_dict
 
     def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
-        so3_input, r3_input, sdf_input, *_ = duplicate_batch_to_size(batch)
-        loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input, "train")
+        so3_input, r3_input, sdf_input, sdf_path,*_ = batch#duplicate_batch_to_size(batch)
+        loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input,sdf_path, "train")
 
         self.log_dict(
             log_dict,
@@ -113,10 +117,9 @@ class Lightning(pl.LightningModule):
         return loss
 
     def validation_step(self, batch: Tuple, batch_idx: int) -> Dict[str, Tensor]:
-        so3_input, r3_input, sdf_input, *_ = batch
-
+        so3_input, r3_input, sdf_input,sdf_path, *_ = batch
         with torch.enable_grad():
-            loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input, "val")
+            loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input,sdf_path, "val")
 
         # Log validation metrics
         self.log_dict(
@@ -208,8 +211,8 @@ class Lightning(pl.LightningModule):
             )
 
         if train_indices is not None and val_indices is not None:
-            print("Training data", train_indices)
-            print("Validation data", val_indices)
+            # print("Training data", train_indices)
+            # print("Validation data", val_indices)
 
             if train_indices & val_indices:
                 print(
@@ -223,9 +226,9 @@ class Lightning(pl.LightningModule):
             (
                 so3_input,
                 r3_input,
-                sdf_input,  # sdf_input
+                sdf_input,
+                mesh_path,# sdf_input
                 norm_params,
-                mesh_path,
                 dataset_mesh_scale,
                 normalization_scale,
             ) = dataset[0]
@@ -261,9 +264,9 @@ class Lightning(pl.LightningModule):
         (
             so3_input,
             r3_input,
-            sdf_input,  # sdf_input
+            sdf_input,
+            mesh_path,# sdf_input
             norm_params,
-            mesh_path,
             dataset_mesh_scale,
             normalization_scale,
         ) = self.trainer.train_dataloader.dataset[random_idx]
@@ -312,3 +315,20 @@ class Lightning(pl.LightningModule):
                 "val/generated_grasp": scene_to_wandb_3d(scene),
             }
         )
+
+    def duplicate_to_batch_size(self,input:Tensor,batch_size:int):
+        current_size = input.size(0)
+        if current_size>=batch_size:
+            return input
+        
+        num_copies = batch_size // current_size
+        remainder = batch_size % current_size
+
+        duplicated = input.repeat(
+            num_copies, *(1 for _ in range(len(input.shape) - 1))
+        )
+        if remainder > 0:
+            duplicated = torch.cat([duplicated, input[:remainder]], dim=0)
+        
+        return duplicated
+        

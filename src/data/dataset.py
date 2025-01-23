@@ -94,8 +94,8 @@ class GraspDataset(Dataset):
             rotation,
             normalized_translation,
             torch.tensor(entry.sdf),
-            self.norm_params,
             entry.mesh_path,
+            self.norm_params,
             entry.dataset_mesh_scale,
             entry.normalization_scale,
         )

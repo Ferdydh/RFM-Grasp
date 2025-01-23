@@ -5,6 +5,7 @@ from torch import Tensor
 from einops import rearrange
 from src.models.sdf_encoder import VoxelSDFEncoder
 from src.core.config import ExperimentConfig
+from typing import List
 
 
 class VelocityNetwork(nn.Module):
@@ -39,7 +40,7 @@ class VelocityNetwork(nn.Module):
         self.final = nn.Linear(hidden_dim, input_dim)
 
     def forward(
-        self, so3_input: Tensor, r3_input: Tensor, sdf_input: Tensor, t: Tensor
+        self, so3_input: Tensor, r3_input: Tensor, sdf_input: Tensor, t: Tensor,sdf_path: Tuple[str] = None
     ) -> Tuple[Tensor, Tensor]:
         """Forward pass computing velocities for both SO3 and R3 components.
 
@@ -58,11 +59,16 @@ class VelocityNetwork(nn.Module):
         elif t.dim() == 3:
             t = t.squeeze(1)
 
-        sdf_features = self.sdf_encoder(sdf_input)
+        if sdf_path:
+            sdf_features = self.efficient_sdf_forward(sdf_input,sdf_path)
+        else:
+            sdf_features = self.sdf_encoder(sdf_input)
 
-        sdf_features = sdf_features.repeat(
-            so3_input.shape[0] // sdf_features.shape[0] + 1, 1
-        )[: so3_input.shape[0]]
+        if sdf_features.shape[0] != so3_input.shape[0]:
+            sdf_features = self.duplicate_to_batch_size(sdf_features,so3_input.shape[0])
+        # sdf_features = sdf_features.repeat(
+        #     so3_input.shape[0] // sdf_features.shape[0] + 1, 1
+        # )[: so3_input.shape[0]]
         # Flatten SO3 input for processing
         so3_flat = rearrange(so3_input, "b c d -> b (c d)")
 
@@ -92,3 +98,56 @@ class VelocityNetwork(nn.Module):
         so3_velocity = so3_input @ skew_symmetric_part
 
         return so3_velocity, r3_velocity
+
+
+    # def efficient_forward(self, so3_input: Tensor,r3_input: Tensor,sdf_input: Tensor,sdf_path: Tuple[str],batch_size:int):
+        
+    #     so3_input = self.duplicate_to_batch_size(so3_input)
+    #     r3_input = self.duplicate_to_batch_size(r3_input)
+        
+        
+
+    # pass
+
+
+    def duplicate_to_batch_size(self,input:Tensor,target_batch_size:int):
+        current_size = input.size(0)
+        if current_size>=target_batch_size:
+            return input
+        
+        num_copies = target_batch_size // current_size
+        remainder = target_batch_size % current_size
+
+        duplicated = input.repeat(
+            num_copies, *(1 for _ in range(len(input.shape) - 1))
+        )
+        if remainder > 0:
+            duplicated = torch.cat([duplicated, input[:remainder]], dim=0)
+        
+        return duplicated
+    
+    def efficient_sdf_forward(self,sdf_input: Tensor,sdf_paths:Tuple):
+        
+        unique_sdf_paths = []
+        unique_indices = []  # indices into 'batch'
+        filename_to_unique_idx = {}
+        
+        for i, sdf_path in enumerate(sdf_paths):
+            if sdf_path not in filename_to_unique_idx:
+                # This is the first time we see filename f
+                filename_to_unique_idx[sdf_path] = len(unique_sdf_paths)  # e.g. 0, 1, 2, ...
+                unique_sdf_paths.append(sdf_path)
+                unique_indices.append(i)
+                
+        mapping = []
+        for sdf_path in sdf_paths:
+            mapping.append(filename_to_unique_idx[sdf_path])
+        #print(mapping)
+        mapping = torch.tensor(mapping, dtype=torch.int)  # shape (N,)
+        #print(len(mapping))
+        
+        unique_batch = sdf_input[unique_indices]
+        encoded_unique = self.sdf_encoder(unique_batch)
+        final_output = encoded_unique[mapping]
+        return final_output
+        

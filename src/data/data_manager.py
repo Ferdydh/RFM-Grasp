@@ -67,7 +67,6 @@ class GraspCache:
         mesh = trimesh.load(mesh_path)
         mesh = mesh.apply_scale(dataset_mesh_scale)
         mesh = enforce_trimesh(mesh)
-
         # Compute SDF and transform grasps
         sdf, normalization_scale, centroid = process_mesh_to_sdf(mesh, sdf_size)
 
