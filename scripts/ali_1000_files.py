@@ -55,10 +55,11 @@ if __name__ == "__main__":
     config.training.sample_interval = 100
 
     # Initialize model
-    config.data.files = 2
     
-    model = Lightning.load_from_checkpoint(
-    checkpoint_path="logs/checkpoints/run_20250123_035011/model-epoch=11799-val_loss=0.00.ckpt",
-    config=config,  
-    )
+    # model = Lightning.load_from_checkpoint(
+    # checkpoint_path="logs/checkpoints/run_20250123_035011/model-epoch=11799-val_loss=0.00.ckpt",
+    # config=config,  
+    # )
+    config.data.files = 1000
+    model = Lightning(config)
     train(model, config)

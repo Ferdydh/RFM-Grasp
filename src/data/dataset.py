@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader, dataset
 from typing import Optional, List, Tuple, Union
 import logging
 import random
-
+import json
 from src.core.config import ExperimentConfig
 from src.data.data_manager import GraspCache
 from src.data.util import NormalizationParams, normalize_translation
@@ -42,12 +42,12 @@ class GraspDataset(Dataset):
             random.shuffle(all_h5)
             selected_files = all_h5[:grasp_files]
             # Extract only the filenames
-            grasp_files = [f.name for f in selected_files]
+            self.grasp_files = [f.name for f in selected_files]
         else:
-            grasp_files = grasp_files
+            self.grasp_files = grasp_files
         
         #print("Grasp files: ", grasp_files)
-        for filename in grasp_files:
+        for filename in self.grasp_files:
             entry = self.cache.get_or_process(filename, data_root, sdf_size)
             if  entry is None:
                 continue
@@ -140,26 +140,26 @@ class DataModule(LightningDataModule):
         # Create split datasets
         if stage == "fit" or stage is None:
             # Create full dataset first
-            full_dataset = GraspDataset(
+            self.full_dataset = GraspDataset(
                 self.data_root,
                 self.grasp_files,
                 num_samples=self.num_samples,
                 device=self.device,
             )
-
+            self.save_used_files_to_json()
             # Calculate split sizes
-            train_size = int(len(full_dataset) * self.split_ratio)
-            val_size = len(full_dataset) - train_size
+            train_size = int(len(self.full_dataset) * self.split_ratio)
+            val_size = len(self.full_dataset) - train_size
 
-            if train_size == len(full_dataset) or val_size == 0 or train_size == 0:
+            if train_size == len(self.full_dataset) or val_size == 0 or train_size == 0:
                 # This should only happen if we have sample_limit=1 or split_ratio=1.0
                 print("Using the same dataset for training and validation.")
-                self.train_dataset = full_dataset
-                self.val_dataset = full_dataset
+                self.train_dataset = self.full_dataset
+                self.val_dataset = self.full_dataset
             else:
                 # TODO: When it becomes a Subset it fails.
                 self.train_dataset, self.val_dataset = dataset.random_split(
-                    full_dataset,
+                    self.full_dataset,
                     [train_size, val_size],
                     generator=torch.Generator(device=self.device),
                 )
@@ -183,3 +183,12 @@ class DataModule(LightningDataModule):
             num_workers=self.num_workers,
             generator=torch.Generator(device=self.device),
         )
+    
+    def save_used_files_to_json(self):
+        dirpath = self.config.training.checkpoint_dir + "/" + self.config.training.run_name
+        os.makedirs(dirpath, exist_ok=True)  # Create the directory if it does not exist
+
+        file_path = os.path.join(dirpath, "used_grasp_files.json")
+        with open(file_path, 'w') as file:
+            json.dump(self.full_dataset.grasp_files, file, indent=4)
+
