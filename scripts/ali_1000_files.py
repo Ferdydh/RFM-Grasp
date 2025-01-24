@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
     # Full one file
     config.data.sample_limit = None
-    config.data.batch_size = 256
+    config.data.batch_size = 128
     # NOTE: i set target_batch_size to 128
     # Which means training data is not duplicated anymore
 
@@ -53,13 +53,13 @@ if __name__ == "__main__":
     config.training.max_epochs = 20000
 
     config.training.sample_interval = 100
-
+    config.training.validation_interval = 0.1
     # Initialize model
     
     # model = Lightning.load_from_checkpoint(
     # checkpoint_path="logs/checkpoints/run_20250123_035011/model-epoch=11799-val_loss=0.00.ckpt",
     # config=config,  
     # )
-    config.data.files = 1000
+    config.data.files = 2
     model = Lightning(config)
     train(model, config)

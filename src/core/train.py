@@ -81,8 +81,8 @@ def train(
             precision=config.training.precision,
             gradient_clip_val=config.training.gradient_clip_val,
             accumulate_grad_batches=config.training.batch_accumulation,
-            val_check_interval=1.0,
-            check_val_every_n_epoch=config.training.validation_interval,
+            val_check_interval=config.training.validation_interval,
+            check_val_every_n_epoch=config.training.val_every_n_epoch,
             log_every_n_steps=1,
         )
 

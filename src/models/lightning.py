@@ -113,6 +113,9 @@ class Lightning(pl.LightningModule):
             prog_bar=True,
             batch_size=self.config.data.batch_size,
         )
+        if (batch_idx % self.config.training.sample_interval == 0) and \
+        (batch_idx // self.config.training.sample_interval >= 1):
+            self.sample_and_log(batch_idx)
 
         return loss
 
@@ -331,4 +334,41 @@ class Lightning(pl.LightningModule):
             duplicated = torch.cat([duplicated, input[:remainder]], dim=0)
         
         return duplicated
+    
+    def sample_and_log(self, batch_idx: int):
+        random_idx = torch.randint(0, len(self.trainer.train_dataloader.dataset), (1,))
+        (
+            so3_input,
+            r3_input,
+            sdf_input,
+            mesh_path,
+            norm_params,
+            dataset_mesh_scale,
+            normalization_scale,
+        ) = self.trainer.train_dataloader.dataset[random_idx]
+
+        sdf_input = rearrange(sdf_input, "... -> 1 1 ...")
+
+        so3_output, r3_output = sample(
+            self.model,
+            sdf_input,
+            r3_input.device,
+            self.config.training.num_samples_to_log,
+        )
+
+        r3_output = denormalize_translation(r3_output, norm_params)
+        r3_input = denormalize_translation(r3_input, norm_params)
+
+        has_collision, scene, min_distance = check_collision_multiple_grasps(
+            so3_output,
+            r3_output,
+            mesh_path,
+            dataset_mesh_scale,
+        )
+
+        self.logger.experiment.log(
+            {
+                f"train/generated_grasp": scene_to_wandb_3d(scene),
+            }
+        )
         

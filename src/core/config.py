@@ -107,7 +107,8 @@ class TrainingConfig:
     warmup_ratio: float = 0.1
 
     # Validation and Logging
-    validation_interval: int = 100
+    validation_interval: int = 0.1
+    val_every_n_epoch: int = 1
     num_samples_to_log: int = 20
     sample_interval: int = 100
 
