@@ -1,11 +1,11 @@
-from typing import Tuple
+from typing import Tuple, Union
 import torch
 import torch.nn as nn
 from torch import Tensor
 from einops import rearrange
 from src.models.sdf_encoder import VoxelSDFEncoder
 from src.core.config import ExperimentConfig
-from typing import List
+from typing import List,Optional
 
 
 class VelocityNetwork(nn.Module):
@@ -26,7 +26,7 @@ class VelocityNetwork(nn.Module):
         self.time_proj = nn.Sequential(nn.Linear(1, hidden_dim), activation())
 
         # Input projection
-        self.input_proj = nn.Linear(input_dim + voxel_output_size, hidden_dim)
+        self.input_proj = nn.Linear(input_dim + voxel_output_size+1, hidden_dim)
         # TODO Two linear layers back to back equivalent to one
         # Hidden layers
         layers = []
@@ -40,7 +40,14 @@ class VelocityNetwork(nn.Module):
         self.final = nn.Linear(hidden_dim, input_dim)
 
     def forward(
-        self, so3_input: Tensor, r3_input: Tensor, sdf_input: Tensor, t: Tensor,sdf_path: Tuple[str] = None
+        self,
+        so3_inputs: Tensor,
+        r3_inputs: Tensor,
+        sdf_inputs: Tensor,
+        t: Tensor,
+        #dataset_mesh_scale: float,
+        normalization_scale: Tensor,
+        sdf_path: Optional[Tuple[str]]=None,
     ) -> Tuple[Tensor, Tensor]:
         """Forward pass computing velocities for both SO3 and R3 components.
 
@@ -58,22 +65,30 @@ class VelocityNetwork(nn.Module):
             t = t.unsqueeze(-1)
         elif t.dim() == 3:
             t = t.squeeze(1)
-
+        #print(type(sdf_path),sdf_inputs.shape)
         if sdf_path:
-            sdf_features = self.efficient_sdf_forward(sdf_input,sdf_path)
+            sdf_features = self.efficient_sdf_forward(sdf_inputs,sdf_path)
         else:
-            sdf_features = self.sdf_encoder(sdf_input)
-
-        if sdf_features.shape[0] != so3_input.shape[0]:
-            sdf_features = self.duplicate_to_batch_size(sdf_features,so3_input.shape[0])
+            sdf_features = self.sdf_encoder(sdf_inputs)
+        #dataset_mesh_scale = dataset_mesh_scale.unsqueeze(1)
+        #print(type(normalization_scale),normalization_scale.shape)
+        normalization_scale = torch.atleast_1d(normalization_scale)  # Ensure tensor
+        normalization_scale = normalization_scale.view(-1, 1)  # [batch_size, 1]
+        normalization_scale = normalization_scale.to(device=so3_inputs.device, 
+                                                    dtype=so3_inputs.dtype)
+        #print(sdf_features.shape)
+        if sdf_features.shape[0] != so3_inputs.shape[0]:
+            sdf_features = self.duplicate_to_batch_size(sdf_features,so3_inputs.shape[0])
+            #dataset_mesh_scale = self.duplicate_to_batch_size(dataset_mesh_scale,so3_inputs.shape[0])
+            normalization_scale = self.duplicate_to_batch_size(normalization_scale,so3_inputs.shape[0])
         # sdf_features = sdf_features.repeat(
-        #     so3_input.shape[0] // sdf_features.shape[0] + 1, 1
-        # )[: so3_input.shape[0]]
+        #     so3_inputs.shape[0] // sdf_features.shape[0] + 1, 1
+        # )[: so3_inputs.shape[0]]
         # Flatten SO3 input for processing
-        so3_flat = rearrange(so3_input, "b c d -> b (c d)")
-
+        so3_flat = rearrange(so3_inputs, "b c d -> b (c d)")
+        #print(so3_flat.shape,sdf_features.shape,r3_inputs.shape,normalization_scale.shape)
         # Combine inputs
-        x = torch.cat([sdf_features, so3_flat, r3_input], dim=-1)
+        x = torch.cat([sdf_features, so3_flat, r3_inputs,normalization_scale], dim=-1)
 
         # Process time and state
         t_emb = self.time_proj(t)
@@ -95,7 +110,7 @@ class VelocityNetwork(nn.Module):
 
         # Project to tangent space
         skew_symmetric_part = 0.5 * (so3_velocity - so3_velocity.permute(0, 2, 1))
-        so3_velocity = so3_input @ skew_symmetric_part
+        so3_velocity = so3_inputs @ skew_symmetric_part
 
         return so3_velocity, r3_velocity
 
@@ -126,8 +141,10 @@ class VelocityNetwork(nn.Module):
         
         return duplicated
     
-    def efficient_sdf_forward(self,sdf_input: Tensor,sdf_paths:Tuple):
+    def efficient_sdf_forward(self,sdf_input: Tensor,sdf_paths: Union[str, Tuple[str]]):
         
+        if isinstance(sdf_paths, str):
+            return self.sdf_encoder(sdf_input)  
         unique_sdf_paths = []
         unique_indices = []  # indices into 'batch'
         filename_to_unique_idx = {}
@@ -150,4 +167,3 @@ class VelocityNetwork(nn.Module):
         encoded_unique = self.sdf_encoder(unique_batch)
         final_output = encoded_unique[mapping]
         return final_output
-        

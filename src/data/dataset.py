@@ -8,12 +8,74 @@ from typing import Optional, List, Tuple, Union
 import logging
 import random
 import json
+from dataclasses import dataclass
+from collections import namedtuple
 from src.core.config import ExperimentConfig
 from src.data.data_manager import GraspCache
 from src.data.util import NormalizationParams, normalize_translation
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+
+# @dataclass
+# class GraspData:
+#     rotation: torch.Tensor
+#     translation: torch.Tensor
+#     sdf: torch.Tensor
+#     mesh_path: str
+#     #norm_params: NormalizationParams
+#     dataset_mesh_scale: float
+#     normalization_scale: float
+#     centroid: np.ndarray
+    
+GraspData = namedtuple("GraspData", ["rotation", "translation", "sdf", "mesh_path", "dataset_mesh_scale", "normalization_scale", "centroid"])
+
+
+# def collate_grasp_data(batch: list[GraspData]):
+#     """
+#     Custom collate function that takes a list of GraspData objects
+#     and returns a dictionary of batched tensors and other fields.
+#     """
+#     rotations = []
+#     translations = []
+#     sdfs = []
+#     mesh_paths = []
+#     dataset_mesh_scales = []
+#     normalization_scales = []
+#     centroids = []
+
+#     # Extract each field from the dataclass and accumulate in lists
+#     for sample in batch:
+#         rotations.append(sample.rotation)
+#         translations.append(sample.translation)
+#         sdfs.append(sample.sdf)
+#         mesh_paths.append(sample.mesh_path)
+#         dataset_mesh_scales.append(sample.dataset_mesh_scale)
+#         normalization_scales.append(sample.normalization_scale)
+#         centroids.append(sample.centroid)
+
+#     # Convert lists of Tensors to a single batched Tensor
+#     rotations = torch.stack(rotations)       # shape: (B, 3, 3)
+#     translations = torch.stack(translations) # shape: (B, 3)
+#     sdfs = torch.stack(sdfs)                 # shape: (B, 48, 48, 48), etc.
+
+#     # For scales and centroids, either convert to Tensors or keep as lists:
+#     dataset_mesh_scales = torch.tensor(dataset_mesh_scales)  # shape: (B,)
+#     normalization_scales = torch.tensor(normalization_scales)# shape: (B,)
+#     centroids = torch.stack([torch.tensor(c) for c in centroids])  # shape: (B, 3)
+
+#     # Return a dictionary (or a new dataclass) with the collated batch
+#     return GraspData(
+#         "rotation": rotations,
+#         "translation": translations,
+#         "sdf": sdfs,
+#         "mesh_path": mesh_paths,  # list of strings
+#         "dataset_mesh_scale": dataset_mesh_scales,
+#         "normalization_scale": normalization_scales,
+#         "centroid": centroids,
+#     )
 
 
 class GraspDataset(Dataset):
@@ -46,7 +108,6 @@ class GraspDataset(Dataset):
         else:
             self.grasp_files = grasp_files
         
-        #print("Grasp files: ", grasp_files)
         for filename in self.grasp_files:
             entry = self.cache.get_or_process(filename, data_root, sdf_size)
             if  entry is None:
@@ -86,7 +147,7 @@ class GraspDataset(Dataset):
     def __getitem__(
         self, idx: int
     ) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, str, float, float, NormalizationParams
+        torch.Tensor, torch.Tensor, torch.Tensor, str, NormalizationParams, float, float
     ]:
         if self.selected_indices is not None:
             idx = self.selected_indices[idx]
@@ -105,15 +166,25 @@ class GraspDataset(Dataset):
         )
         normalized_translation = normalize_translation(translation, self.norm_params)
 
-        return (
-            rotation,
-            normalized_translation,
-            torch.tensor(entry.sdf),
-            entry.mesh_path,
-            self.norm_params,
-            entry.dataset_mesh_scale,
-            entry.normalization_scale,
-        )
+        # return {
+        #     'rotation':rotation,
+        #     'translation':normalized_translation,
+        #     'sdf':torch.tensor(entry.sdf),
+        #     'mesh_path':entry.mesh_path,
+        #     #norm_params:self.norm_params,
+        #     'dataset_mesh_scale':entry.dataset_mesh_scale,
+        #     'normalization_scale':entry.normalization_scale,
+        #     'centroid':entry.centroid,
+        # }
+        return GraspData(
+        rotation=rotation,
+        translation=normalized_translation,
+        sdf=torch.tensor(entry.sdf),
+        mesh_path=entry.mesh_path,
+        dataset_mesh_scale=entry.dataset_mesh_scale,
+        normalization_scale=entry.normalization_scale,
+        centroid=entry.centroid,
+    )
 
 
 class DataModule(LightningDataModule):

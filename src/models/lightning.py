@@ -2,7 +2,7 @@
 import torch.nn.functional as F
 from einops import rearrange
 from scipy.spatial.transform import Rotation
-from typing import Tuple, Dict
+from typing import Tuple, Dict,Optional
 import pytorch_lightning as pl
 import torch
 from torch import Tensor
@@ -20,6 +20,7 @@ from src.core.visualize import (
 from src.models.flow import sample, sample_location_and_conditional_flow
 from src.models.velocity_mlp import VelocityNetwork
 from src.models.wasserstein import wasserstein_distance
+from src.data.dataset import GraspData
 
 
 class Lightning(pl.LightningModule):
@@ -39,6 +40,8 @@ class Lightning(pl.LightningModule):
         r3_inputs: Tensor,
         sdf_inputs: Tensor,
         sdf_path: Tuple[str],
+        #dataset_mesh_scale: float,
+        normalization_scale: float,
         prefix: str = "train",
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """Compute combined loss for both manifolds with synchronized time sampling.
@@ -77,7 +80,7 @@ class Lightning(pl.LightningModule):
 
         # Forward pass now expects [batch, 3, 3] format
         vt_so3, predicted_flow = self.model.forward(
-            xt_so3, x_t_r3, sdf_inputs, t_expanded,sdf_path
+            xt_so3, x_t_r3, sdf_inputs, t_expanded, normalization_scale,sdf_path
         )
         # vt_so3 is now directly [batch, 3, 3]
 
@@ -105,8 +108,15 @@ class Lightning(pl.LightningModule):
         return total_loss, loss_dict
 
     def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
-        so3_input, r3_input, sdf_input, sdf_path,*_ = batch#duplicate_batch_to_size(batch)
-        loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input,sdf_path, "train")
+        grasp_data = batch
+        loss, log_dict = self.compute_loss(
+            grasp_data.rotation,
+            grasp_data.translation,
+            grasp_data.sdf,
+            grasp_data.mesh_path,
+            grasp_data.normalization_scale,
+            "train"
+        )
 
         self.log_dict(
             log_dict,
@@ -115,14 +125,21 @@ class Lightning(pl.LightningModule):
         )
         if (batch_idx % self.config.training.sample_interval == 0) and \
         (batch_idx // self.config.training.sample_interval >= 1):
-            self.sample_and_log(batch_idx)
+            self.sample_and_log()
 
         return loss
 
     def validation_step(self, batch: Tuple, batch_idx: int) -> Dict[str, Tensor]:
-        so3_input, r3_input, sdf_input,sdf_path, *_ = batch
+        grasp_data = batch
         with torch.enable_grad():
-            loss, log_dict = self.compute_loss(so3_input, r3_input, sdf_input,sdf_path, "val")
+            loss, log_dict = self.compute_loss(
+                grasp_data.rotation,
+                grasp_data.translation,
+                grasp_data.sdf,
+                grasp_data.mesh_path,
+                grasp_data.normalization_scale,
+                "val"
+            )
 
         # Log validation metrics
         self.log_dict(
@@ -182,6 +199,9 @@ class Lightning(pl.LightningModule):
             else val_dataset
         )
 
+        self.translation_norm_params = train_base.norm_params
+        #print(self.translation_norm_params)
+
         # First get selected_indices from the base dataset if they exist
         base_selected = (
             train_base.selected_indices
@@ -214,9 +234,6 @@ class Lightning(pl.LightningModule):
             )
 
         if train_indices is not None and val_indices is not None:
-            # print("Training data", train_indices)
-            # print("Validation data", val_indices)
-
             if train_indices & val_indices:
                 print(
                     "Warning: Overlapping indices found between training and validation sets."
@@ -226,27 +243,12 @@ class Lightning(pl.LightningModule):
             ("train", self.trainer.train_dataloader.dataset),
             ("val", self.trainer.val_dataloaders.dataset),
         ]:
-            (
-                so3_input,
-                r3_input,
-                sdf_input,
-                mesh_path,# sdf_input
-                norm_params,
-                dataset_mesh_scale,
-                normalization_scale,
-            ) = dataset[0]
-
-            r3_input = denormalize_translation(r3_input, norm_params)
-            has_collision, scene, min_distance = check_collision(
-                so3_input,
-                r3_input,
-                mesh_path,
-                dataset_mesh_scale,
-            )
+            grasp_data = dataset[0]
+            scene = self.compute_grasp_scene(grasp_data)
 
             gripper_transform = torch.eye(4)
-            gripper_transform[:3, :3] = so3_input[:3, :3]
-            gripper_transform[:3, 3] = r3_input.squeeze()
+            gripper_transform[:3, :3] = grasp_data.rotation[:3, :3]
+            gripper_transform[:3, 3] = denormalize_translation(grasp_data.translation, self.translation_norm_params).squeeze()
 
             gripper_transform = wandb.Table(
                 data=gripper_transform.cpu().numpy().tolist(),
@@ -256,68 +258,8 @@ class Lightning(pl.LightningModule):
             self.logger.experiment.log(
                 {
                     f"{prefix}/original_grasp": scene_to_wandb_3d(scene),
-                    # f"{prefix}/original_grasp_transform": gripper_transform,
                 }
             )
-
-    def on_train_epoch_end(self):
-        if self.current_epoch % self.config.training.sample_interval != 0:
-            return
-        random_idx = torch.randint(0, len(self.trainer.train_dataloader.dataset), (1,))
-        (
-            so3_input,
-            r3_input,
-            sdf_input,
-            mesh_path,# sdf_input
-            norm_params,
-            dataset_mesh_scale,
-            normalization_scale,
-        ) = self.trainer.train_dataloader.dataset[random_idx]
-        # print('Initialtype',type(sdf_input))
-        # Generate samples
-        sdf_input = rearrange(sdf_input, "... -> 1 1 ...")
-
-        # print(r3_input.shape)
-        so3_output, r3_output = sample(
-            self.model,
-            sdf_input,
-            r3_input.device,
-            self.config.training.num_samples_to_log,
-        )
-
-        # TODO maybe make this one line (It's not a requirement.)
-        r3_output = denormalize_translation(r3_output, norm_params)
-        r3_input = denormalize_translation(r3_input, norm_params)
-
-        # # Compute Wasserstein distances
-        # w_dist_so3 = wasserstein_distance(
-        #     so3_input.unsqueeze(0), so3_output, space="so3", method="exact", power=2
-        # )
-        # w_dist_r3 = wasserstein_distance(
-        #     r3_input.unsqueeze(0), r3_output, space="r3", method="exact", power=2
-        # )
-
-        # Log Wasserstein distances
-        # self.logger.experiment.log(
-        #     {
-        #         "val/wasserstein_distance_so3": w_dist_so3,
-        #         "val/wasserstein_distance_r3": w_dist_r3,
-        #     }
-        # )
-
-        has_collision, scene, min_distance = check_collision_multiple_grasps(
-            so3_output,
-            r3_output,
-            mesh_path,
-            dataset_mesh_scale,
-        )
-
-        # Log each sample's visualization
-        self.logger.experiment.log(
-            {
-                "val/generated_grasp": scene_to_wandb_3d(scene),
-            }
-        )
 
     def duplicate_to_batch_size(self,input:Tensor,batch_size:int):
         current_size = input.size(0)
@@ -335,40 +277,66 @@ class Lightning(pl.LightningModule):
         
         return duplicated
     
-    def sample_and_log(self, batch_idx: int):
+    def sample_and_log(self):
+        
         random_idx = torch.randint(0, len(self.trainer.train_dataloader.dataset), (1,))
-        (
-            so3_input,
-            r3_input,
-            sdf_input,
-            mesh_path,
-            norm_params,
-            dataset_mesh_scale,
-            normalization_scale,
-        ) = self.trainer.train_dataloader.dataset[random_idx]
+        grasp_data = self.trainer.train_dataloader.dataset[random_idx]
+        
 
-        sdf_input = rearrange(sdf_input, "... -> 1 1 ...")
+        sdf_input = rearrange(grasp_data.sdf, "... -> 1 1 ...")
 
         so3_output, r3_output = sample(
             self.model,
             sdf_input,
-            r3_input.device,
+            grasp_data.translation.device,
+            torch.tensor(grasp_data.normalization_scale),
             self.config.training.num_samples_to_log,
+            sdf_path=grasp_data.mesh_path,
+            # grasp_data.dataset_mesh_scale,
+            # grasp_data.normalization_scale
         )
+        scene = self.compute_grasp_scene(grasp_data,(r3_output,so3_output))
+        # r3_output = denormalize_translation(r3_output, self.translation_norm_params)
+        # r3_output += grasp_data.centroid
 
-        r3_output = denormalize_translation(r3_output, norm_params)
-        r3_input = denormalize_translation(r3_input, norm_params)
-
-        has_collision, scene, min_distance = check_collision_multiple_grasps(
-            so3_output,
-            r3_output,
-            mesh_path,
-            dataset_mesh_scale,
-        )
+        # has_collision, scene, min_distance = check_collision_multiple_grasps(
+        #     so3_output,
+        #     r3_output,
+        #     grasp_data.mesh_path,
+        #     grasp_data.dataset_mesh_scale,
+        # )
 
         self.logger.experiment.log(
             {
                 f"train/generated_grasp": scene_to_wandb_3d(scene),
             }
         )
-        
+    def compute_grasp_scene(
+        self,
+        grasp_data: GraspData,
+        r3_so3_inputs: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+    ):
+        # Get normalized translation and rotation from inputs or grasp_data
+        normalized_translation, rotation = (
+            r3_so3_inputs if r3_so3_inputs is not None 
+            else (grasp_data.translation, grasp_data.rotation)
+        )
+
+        # Denormalize and adjust translation with centroid
+        denormalized_translation = denormalize_translation(
+            normalized_translation, 
+            self.translation_norm_params
+        )
+        final_translation = denormalized_translation + torch.tensor(
+            grasp_data.centroid, 
+            device=denormalized_translation.device
+        )
+        collision_function = check_collision_multiple_grasps if r3_so3_inputs else check_collision
+        #print(rotation.shape,final_translation.shape)
+        _,scene,_ = collision_function(
+            rotation,
+            final_translation,
+            grasp_data.mesh_path,
+            grasp_data.dataset_mesh_scale,
+        )
+        return scene

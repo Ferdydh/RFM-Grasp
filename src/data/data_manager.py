@@ -23,6 +23,7 @@ class GraspCacheEntry:
     dataset_mesh_scale: float
     normalization_scale: float
     mesh_path: str
+    centroid: np.ndarray 
 
 
 class GraspCache:
@@ -54,9 +55,6 @@ class GraspCache:
         grasp_file = os.path.join(data_root, "grasps", grasp_filename)
 
         with h5py.File(grasp_file, "r") as h5file:
-            mesh_fname = h5file["object/file"][()].decode("utf-8")
-            dataset_mesh_scale = h5file["object/scale"][()]
-
             transforms = h5file["grasps"]["transforms"][:]
             grasp_success = h5file["grasps"]["qualities"]["flex"]["object_in_gripper"][
                 :
@@ -64,6 +62,11 @@ class GraspCache:
             transforms = transforms[grasp_success == 1]
             if transforms.size == 0:
                 return None
+            mesh_fname = h5file["object/file"][()].decode("utf-8")
+            dataset_mesh_scale = h5file["object/scale"][()]
+
+            
+            
         # Load and process mesh
         mesh_path = os.path.join(data_root, mesh_fname)
         mesh = trimesh.load(mesh_path)
@@ -71,7 +74,8 @@ class GraspCache:
         mesh = enforce_trimesh(mesh)
         # Compute SDF and transform grasps
         sdf, normalization_scale, centroid = process_mesh_to_sdf(mesh, sdf_size)
-
+        print(transforms.shape,centroid.shape)
+        transforms[:, :3, 3] -= centroid
         # Create and cache entry
         entry = GraspCacheEntry(
             sdf=sdf,
@@ -79,6 +83,7 @@ class GraspCache:
             dataset_mesh_scale=dataset_mesh_scale,
             normalization_scale=normalization_scale,
             mesh_path=mesh_path,
+            centroid=centroid,
         )
         self.cache[grasp_filename] = entry
 

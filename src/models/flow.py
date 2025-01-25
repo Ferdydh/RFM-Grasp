@@ -1,5 +1,5 @@
 from scipy.spatial.transform import Rotation
-from typing import Tuple
+from typing import Tuple, Optional  
 import torch
 from einops import rearrange
 from torch import Tensor, vmap
@@ -132,8 +132,10 @@ def inference_step(
     so3_state: Tensor,
     r3_state: Tensor,
     sdf_input: Tensor,
+    normalization_scale: Tensor,
     t: Tensor,
     dt: Tensor,
+    sdf_path: Optional[Tuple[str]] = None,
 ) -> Tuple[Tensor, Tensor]:
     """Single step inference.
 
@@ -148,7 +150,7 @@ def inference_step(
         Tuple of (next_so3_state, next_r3_state)
     """
     # Get velocities - model now expects [batch, 3, 3] input
-    so3_velocity, r3_velocity = model(so3_state, r3_state, sdf_input, t)
+    so3_velocity, r3_velocity = model(so3_state, r3_state, sdf_input, t,normalization_scale, sdf_path)
 
     # R3 update remains the same
     r3_next = r3_state + dt * r3_velocity
@@ -168,8 +170,10 @@ def sample(
     model: VelocityNetwork,
     sdf_input: Tensor,
     device: torch.device,
+    normalization_scale: Tensor,
     num_samples: int = 1,
     steps: int = 200,
+    sdf_path: Optional[Tuple[str]] = None,
 ) -> Tuple[Tensor, Tensor]:
     """Generate samples.
 
@@ -201,7 +205,7 @@ def sample(
             torch.tensor([t_i], dtype=torch.float64).repeat(num_samples).to(device)
         )
         so3_traj, r3_traj = inference_step(
-            model, so3_traj, r3_traj, sdf_input, t_batch, dt
+            model, so3_traj, r3_traj, sdf_input,normalization_scale, t_batch, dt,sdf_path
         )
 
     # No need to reshape SO3 output as it's already in the correct shape
