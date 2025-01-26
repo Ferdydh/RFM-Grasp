@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from collections import namedtuple
 from src.core.config import ExperimentConfig
 from src.data.data_manager import GraspCache
+import concurrent.futures
 from src.data.util import NormalizationParams, normalize_translation
 
 logging.basicConfig(level=logging.INFO)
@@ -83,16 +84,18 @@ class GraspDataset(Dataset):
         self,
         data_root: str,
         grasp_files: Union[List[str], int],
+        config: ExperimentConfig,
         split: str = "train",
         num_samples: Optional[int] = None,
-        sdf_size: int = 48,
+        sdf_size: int = 32,
         device: torch.device = torch.device("cpu"),
+        
     ):
         self.data_root = data_root
         self.sdf_size = sdf_size
         self.device = device
         self.cache = GraspCache(os.path.join(data_root, "grasp_cache"))
-
+        self.config = config
         # Process all grasp files
         self.grasp_entries = []
         total_grasps = 0
@@ -107,31 +110,88 @@ class GraspDataset(Dataset):
             self.grasp_files = [f.name for f in selected_files]
         else:
             self.grasp_files = grasp_files
-        
-        for filename in self.grasp_files:
-            entry = self.cache.get_or_process(filename, data_root, sdf_size)
-            if  entry is None:
+                # We'll store results in a list the same length as self.grasp_files
+        results = [None] * len(self.grasp_files)
+
+        # 1. Create a list of arguments (one per file)
+        process_args = [
+            (fname, self.data_root, self.sdf_size, os.path.join(self.data_root, "grasp_cache")) 
+            for fname in self.grasp_files
+        ]
+
+        # 2. Use ProcessPoolExecutor for CPU-bound parallelism
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.config.data.dataset_workers) as executor:
+            future_to_idx = {
+                executor.submit(self.process_one_file, arg_tuple): i
+                for i, arg_tuple in enumerate(process_args)
+            }
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                results[idx] = future.result()
+
+        # 3. Filter out Nones & gather global min/max
+        valid_entries = [res for res in results if res is not None]
+        if not valid_entries:
+            # edge case: no valid files
+            self.grasp_entries = []
+            self.total_grasps = 0
+            self.norm_params = NormalizationParams(torch.zeros(3), torch.ones(3))
+            return
+
+        # Compute global min/max from all valid entries
+        mins = [res[2] for res in valid_entries]  # local_min
+        maxs = [res[3] for res in valid_entries]  # local_max
+        global_min = np.min(mins, axis=0)
+        global_max = np.max(maxs, axis=0)
+
+        # 4. Reconstruct self.grasp_entries in order & update total_grasps
+        self.grasp_entries = []
+        total_grasps = 0
+        for idx, res in enumerate(results):
+            if res is None:
+                # skip
                 continue
-            num_grasps = len(entry.transforms)
+            filename, entry, _, _, num_grasps = res
+            self.cache.cache[filename] = entry
             self.grasp_entries.append(
                 (filename, total_grasps, total_grasps + num_grasps)
             )
-            # Calculate min/max for normalization
-            translations = entry.transforms[:, :3, 3] 
-            if not hasattr(self, "trans_min"):
-                self.trans_min = translations.min(axis=0)
-                self.trans_max = translations.max(axis=0)
-            else:
-                self.trans_min = np.minimum(self.trans_min, translations.min(axis=0))
-                self.trans_max = np.maximum(self.trans_max, translations.max(axis=0))
             total_grasps += num_grasps
 
         self.total_grasps = total_grasps
 
+        # 5. Normalization parameters
         self.norm_params = NormalizationParams(
-            min=torch.tensor(self.trans_min), max=torch.tensor(self.trans_max)
+            min=torch.tensor(global_min), 
+            max=torch.tensor(global_max)
         )
-        print("Calculated min_max values: ", self.trans_min, self.trans_max)
+        print("Calculated min/max values: ", global_min, global_max)
+
+        # for filename in self.grasp_files:
+        #     entry = self.cache.get_or_process(filename, data_root, sdf_size)
+        #     if  entry is None:
+        #         continue
+        #     num_grasps = len(entry.transforms)
+        #     self.grasp_entries.append(
+        #         (filename, total_grasps, total_grasps + num_grasps)
+        #     )
+        #     # Calculate min/max for normalization
+        #     translations = entry.transforms[:, :3, 3] 
+        #     if not hasattr(self, "trans_min"):
+        #         self.trans_min = translations.min(axis=0)
+        #         self.trans_max = translations.max(axis=0)
+        #     else:
+        #         self.trans_min = np.minimum(self.trans_min, translations.min(axis=0))
+        #         self.trans_max = np.maximum(self.trans_max, translations.max(axis=0))
+        #     total_grasps += num_grasps
+
+        # self.total_grasps = total_grasps
+
+        # self.norm_params = NormalizationParams(
+        #     min=torch.tensor(self.trans_min), max=torch.tensor(self.trans_max)
+        # )
+        # print("Calculated min_max values: ", self.trans_min, self.trans_max)
 
         # Sample if needed
         if num_samples and num_samples < self.total_grasps:
@@ -185,6 +245,27 @@ class GraspDataset(Dataset):
         normalization_scale=entry.normalization_scale,
         centroid=entry.centroid,
     )
+    def process_one_file(self,args):
+        """
+        This function is defined at the top level to be pickleable by multiprocessing.
+        Returns a tuple: (filename, entry, local_min, local_max, num_grasps) or None if entry fails.
+        """
+        (filename, data_root, sdf_size, cache_dir) = args
+        
+        cache = GraspCache(cache_dir)
+        entry = cache.get_or_process(filename, data_root, sdf_size)
+        if entry is None:
+            return None
+        
+        # local min/max
+        translations = entry.transforms[:, :3, 3]
+        return (
+            filename,
+            entry,
+            translations.min(axis=0),
+            translations.max(axis=0),
+            len(entry.transforms),
+        )
 
 
 class DataModule(LightningDataModule):
@@ -214,8 +295,10 @@ class DataModule(LightningDataModule):
             self.full_dataset = GraspDataset(
                 self.data_root,
                 self.grasp_files,
+                self.config,
                 num_samples=self.num_samples,
                 device=self.device,
+                
             )
             self.save_used_files_to_json()
             # Calculate split sizes

@@ -37,6 +37,7 @@ class DataConfig:
     num_workers: int = 1
     sample_limit: Optional[int] = None
     split_ratio: float = 0.9  # Train-Val split ratio of 90-10%
+    dataset_workers: int = 1
 
     @classmethod
     def sanity(cls) -> "DataConfig":

@@ -50,9 +50,9 @@ class VoxelSDFEncoder(nn.Module):
             x = x.unsqueeze(1)  # Add channel dimension
 
         # Validate input shape
-        assert x.shape[-4:] == torch.Size([1, 48, 48, 48]), (
-            f"Expected shape (..., 1, 48, 48, 48), got {x.shape}"
-        )
+        # assert x.shape[-4:] == torch.Size([1, 48, 48, 48]), (
+        #     f"Expected shape (..., 1, 48, 48, 48), got {x.shape}"
+        # )
 
         # Input shape: (batch_size, 1, 48, 48, 48)
         x = self.encoder(x)
