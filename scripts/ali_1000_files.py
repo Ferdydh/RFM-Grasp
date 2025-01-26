@@ -52,8 +52,9 @@ if __name__ == "__main__":
     config.training.early_stop_patience = 100
     config.training.max_epochs = 20000
 
-    config.training.sample_interval = 100
-    config.training.validation_interval = 0.1
+    config.training.sample_interval = 3
+    config.training.validation_interval = 0.5
+    config.training.duplicate_ratio = 8
     # Initialize model
     
     # model = Lightning.load_from_checkpoint(
