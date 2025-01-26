@@ -56,13 +56,13 @@ class Lightning(pl.LightningModule):
         """
         # Sample synchronized time points for both manifolds
         
-        so3_inputs = self.model.duplicate_to_batch_size(so3_inputs,self.config.data.batch_size)
-        r3_inputs = self.model.duplicate_to_batch_size(r3_inputs,self.config.data.batch_size)
-        t = torch.rand(self.config.data.batch_size, device=so3_inputs.device)
+        so3_inputs = self.model.duplicate_to_batch_size(so3_inputs,self.config.data.batch_size,self.config.training.duplicate_ratio)
+        r3_inputs = self.model.duplicate_to_batch_size(r3_inputs,self.config.data.batch_size,self.config.training.duplicate_ratio)
+        t = torch.rand(r3_inputs.size(0), device=so3_inputs.device)
 
         # SO3 computation - already in [batch, 3, 3] format
         x0_so3 = torch.tensor(
-            Rotation.random(self.config.data.batch_size).as_matrix(), device=so3_inputs.device
+            Rotation.random(r3_inputs.size(0)).as_matrix(), device=so3_inputs.device
         )  # Shape: [batch, 3, 3]
 
         # Sample location and flow for SO

@@ -125,21 +125,26 @@ class VelocityNetwork(nn.Module):
     # pass
 
 
-    def duplicate_to_batch_size(self,input:Tensor,target_batch_size:int):
+    def duplicate_to_batch_size(self,input:Tensor,target_batch_size:int,duplicate_ratio:int = 1):
         current_size = input.size(0)
-        if current_size>=target_batch_size:
+        if (current_size>=target_batch_size) and (duplicate_ratio == 1):
             return input
-        
-        num_copies = target_batch_size // current_size
-        remainder = target_batch_size % current_size
-
-        duplicated = input.repeat(
-            num_copies, *(1 for _ in range(len(input.shape) - 1))
+        elif duplicate_ratio > 1:
+            duplicated = input.repeat(
+            duplicate_ratio, *(1 for _ in range(len(input.shape) - 1))
         )
-        if remainder > 0:
-            duplicated = torch.cat([duplicated, input[:remainder]], dim=0)
-        
-        return duplicated
+            return duplicated
+        else: 
+            num_copies = target_batch_size // current_size
+            remainder = target_batch_size % current_size
+
+            duplicated = input.repeat(
+                num_copies, *(1 for _ in range(len(input.shape) - 1))
+            )
+            if remainder > 0:
+                duplicated = torch.cat([duplicated, input[:remainder]], dim=0)
+            
+            return duplicated
     
     def efficient_sdf_forward(self,sdf_input: Tensor,sdf_paths: Union[str, Tuple[str]]):
         

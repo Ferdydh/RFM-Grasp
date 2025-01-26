@@ -96,6 +96,7 @@ class TrainingConfig:
     gradient_clip_val: float = 1.0
     r3_loss_weight: float = 3.0
     so3_loss_weight: float = 1.0
+    duplicate_ratio: int = 1
 
     # Optimizer & Scheduler
     learning_rate: float = 1e-4
