@@ -110,63 +110,173 @@ class GraspDataset(Dataset):
             self.grasp_files = [f.name for f in selected_files]
         else:
             self.grasp_files = grasp_files
-                # We'll store results in a list the same length as self.grasp_files
+        
+        logger.info(f"Number of .h5 files to process: {len(self.grasp_files)}")
         results = [None] * len(self.grasp_files)
+        
+             # Decide which files need to be processed
+        to_process = []
+        for i, fname in enumerate(self.grasp_files):
+            if fname in self.cache.cache:
+                # Already in cache (could be valid or None)
+                entry = self.cache.cache[fname]
+                if entry is None:
+                    # Means 0 transforms from previous run => skip
+                    results[i] = (fname, None, None, None, 0)
+                else:
+                    # It's a GraspCacheEntry => gather local min/max
+                    transforms = entry.transforms
+                    local_min = np.min(transforms[:, :3, 3], axis=0)
+                    local_max = np.max(transforms[:, :3, 3], axis=0)
+                    num_grasps = len(transforms)
+                    results[i] = (fname, entry, local_min, local_max, num_grasps)
+            else:
+                # Not in cache => queue for processing
+                to_process.append((i, fname))
+        
+        
+        if to_process:
+            logger.info(f"Processing {len(to_process)} files in parallel.")
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.config.data.dataset_workers
+            ) as executor:
 
-        # 1. Create a list of arguments (one per file)
-        process_args = [
-            (fname, self.data_root, self.sdf_size, os.path.join(self.data_root, "grasp_cache")) 
-            for fname in self.grasp_files
-        ]
+                future_to_idx = {}
+                for (i, fname) in to_process:
+                    args = (fname, self.data_root, self.sdf_size)
+                    fut = executor.submit(self.cache.process_one_file, args)
+                    future_to_idx[fut] = i
 
-        # 2. Use ProcessPoolExecutor for CPU-bound parallelism
-        with concurrent.futures.ProcessPoolExecutor(max_workers=self.config.data.dataset_workers) as executor:
-            future_to_idx = {
-                executor.submit(self.process_one_file, arg_tuple): i
-                for i, arg_tuple in enumerate(process_args)
-            }
-            # Collect results as they complete
-            for future in concurrent.futures.as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                results[idx] = future.result()
-
-        # 3. Filter out Nones & gather global min/max
-        valid_entries = [res for res in results if res is not None]
-        if not valid_entries:
-            # edge case: no valid files
-            self.grasp_entries = []
-            self.total_grasps = 0
-            self.norm_params = NormalizationParams(torch.zeros(3), torch.ones(3))
-            return
-
-        # Compute global min/max from all valid entries
-        mins = [res[2] for res in valid_entries]  # local_min
-        maxs = [res[3] for res in valid_entries]  # local_max
-        global_min = np.min(mins, axis=0)
-        global_max = np.max(maxs, axis=0)
-
-        # 4. Reconstruct self.grasp_entries in order & update total_grasps
+                for fut in concurrent.futures.as_completed(future_to_idx):
+                    i = future_to_idx[fut]
+                    res = fut.result()  # => (filename, entry, local_min, local_max, num_grasps) or None
+                    if res is None:
+                        # Something failed => skip
+                        results[i] = None
+                    else:
+                        results[i] = res
+        
+        for i, out in enumerate(results):
+            if out is None:
+                # either error or didn't exist => store as None in cache
+                fname = self.grasp_files[i]
+                self.cache.cache[fname] = None
+            else:
+                fname, entry, _, _, _ = out
+                # entry might be None if 0 transforms => also store None
+                self.cache.cache[fname] = entry
+        self.cache._save()  # Write cache once
+        
+        
+        
+        
         self.grasp_entries = []
+        self.trans_min = None
+        self.trans_max = None
         total_grasps = 0
-        for idx, res in enumerate(results):
-            if res is None:
+
+        for out in results:
+            if (out is None) or (out[1] is None):
                 # skip
                 continue
-            filename, entry, _, _, num_grasps = res
-            self.cache.cache[filename] = entry
-            self.grasp_entries.append(
-                (filename, total_grasps, total_grasps + num_grasps)
-            )
+            fname, entry, local_min, local_max, num_grasps = out
+            # self.grasp_entries: (filename, start_idx, end_idx)
+            self.grasp_entries.append((fname, total_grasps, total_grasps + num_grasps))
+
+            if self.trans_min is None:
+                self.trans_min = local_min
+                self.trans_max = local_max
+            else:
+                self.trans_min = np.minimum(self.trans_min, local_min)
+                self.trans_max = np.maximum(self.trans_max, local_max)
+
             total_grasps += num_grasps
 
         self.total_grasps = total_grasps
+        if total_grasps == 0:
+            logger.warning("No valid grasps found in all files.")
 
-        # 5. Normalization parameters
-        self.norm_params = NormalizationParams(
-            min=torch.tensor(global_min), 
-            max=torch.tensor(global_max)
-        )
-        print("Calculated min/max values: ", global_min, global_max)
+        # Build normalization params
+        if self.trans_min is not None and self.trans_max is not None:
+            self.norm_params = NormalizationParams(
+                min=torch.tensor(self.trans_min, dtype=torch.float32),
+                max=torch.tensor(self.trans_max, dtype=torch.float32),
+            )
+            logger.info(f"Global min: {self.trans_min}, max: {self.trans_max}")
+        else:
+            self.norm_params = NormalizationParams(
+                min=torch.zeros(3),
+                max=torch.ones(3),
+            )
+
+        # Optionally sample a subset
+        if num_samples and num_samples < self.total_grasps:
+            chosen = torch.randperm(self.total_grasps)[:num_samples]
+            self.selected_indices = sorted(chosen.tolist())
+            self.total_grasps = num_samples
+        else:
+            self.selected_indices = None
+        
+        
+        
+        
+                # We'll store results in a list the same length as self.grasp_files
+        #results = [None] * len(self.grasp_files)
+
+        # # 1. Create a list of arguments (one per file)
+        # process_args = [
+        #     (fname, self.data_root, self.sdf_size, os.path.join(self.data_root, "grasp_cache")) 
+        #     for fname in self.grasp_files
+        # ]
+
+        # # 2. Use ProcessPoolExecutor for CPU-bound parallelism
+        # with concurrent.futures.ProcessPoolExecutor(max_workers=self.config.data.dataset_workers) as executor:
+        #     future_to_idx = {
+        #         executor.submit(self.process_one_file, arg_tuple): i
+        #         for i, arg_tuple in enumerate(process_args)
+        #     }
+        #     # Collect results as they complete
+        #     for future in concurrent.futures.as_completed(future_to_idx):
+        #         idx = future_to_idx[future]
+        #         results[idx] = future.result()
+
+        # # 3. Filter out Nones & gather global min/max
+        # valid_entries = [res for res in results if res is not None]
+        # if not valid_entries:
+        #     # edge case: no valid files
+        #     self.grasp_entries = []
+        #     self.total_grasps = 0
+        #     self.norm_params = NormalizationParams(torch.zeros(3), torch.ones(3))
+        #     return
+
+        # # Compute global min/max from all valid entries
+        # mins = [res[2] for res in valid_entries]  # local_min
+        # maxs = [res[3] for res in valid_entries]  # local_max
+        # global_min = np.min(mins, axis=0)
+        # global_max = np.max(maxs, axis=0)
+
+        # # 4. Reconstruct self.grasp_entries in order & update total_grasps
+        # self.grasp_entries = []
+        # total_grasps = 0
+        # for idx, res in enumerate(results):
+        #     if res is None:
+        #         # skip
+        #         continue
+        #     filename, entry, _, _, num_grasps = res
+        #     self.cache.cache[filename] = entry
+        #     self.grasp_entries.append(
+        #         (filename, total_grasps, total_grasps + num_grasps)
+        #     )
+        #     total_grasps += num_grasps
+
+        # self.total_grasps = total_grasps
+
+        # # 5. Normalization parameters
+        # self.norm_params = NormalizationParams(
+        #     min=torch.tensor(global_min), 
+        #     max=torch.tensor(global_max)
+        # )
+        # print("Calculated min/max values: ", global_min, global_max)
 
         # for filename in self.grasp_files:
         #     entry = self.cache.get_or_process(filename, data_root, sdf_size)
@@ -193,16 +303,18 @@ class GraspDataset(Dataset):
         # )
         # print("Calculated min_max values: ", self.trans_min, self.trans_max)
 
-        # Sample if needed
-        if num_samples and num_samples < self.total_grasps:
-            selected_indices = torch.randperm(self.total_grasps)[:num_samples]
-            self.selected_indices = sorted(selected_indices.tolist())
-            self.total_grasps = num_samples
-        else:
-            self.selected_indices = None
+        # # Sample if needed
+        # if num_samples and num_samples < self.total_grasps:
+        #     selected_indices = torch.randperm(self.total_grasps)[:num_samples]
+        #     self.selected_indices = sorted(selected_indices.tolist())
+        #     self.total_grasps = num_samples
+        # else:
+        #     self.selected_indices = None
 
     def __len__(self):
         return self.total_grasps
+
+
 
     def __getitem__(
         self, idx: int
@@ -300,6 +412,7 @@ class DataModule(LightningDataModule):
                 device=self.device,
                 
             )
+            #self.full_dataset.check_for_nans()
             self.save_used_files_to_json()
             # Calculate split sizes
             train_size = int(len(self.full_dataset) * self.split_ratio)

@@ -103,26 +103,86 @@ def sample_location_and_conditional_flow(x0, x1, t):
     rot_x1 = rotmat_to_rotvec(x1)
     log_x1 = vec_manifold.log_not_from_identity(rot_x1, rot_x0)
 
+    # print(f"Max rot_x0: {rot_x0.abs().max().item()}")
+    # print(f"Max rot_x1: {rot_x1.abs().max().item()}")
+    # print(f"Max log_x1: {log_x1.abs().max().item()}")
+
+    
+    # if torch.norm(rot_x0 - rot_x1) < 1e-6:
+    #     print("x0 and x1 are too close, potential numerical instability")
+    #     log_x1 = torch.zeros_like(log_x1)  # Set tangent vector to zero
+    # if torch.norm(rot_x0 + rot_x1) < 1e-6:
+    #     print("x0 and x1 are antipodal, potential numerical instability")
+    #     log_x1 = torch.zeros_like(log_x1)  # Set tangent vector to zero
+    # # Print statements to check for NaNs
+    # if torch.isnan(rot_x0).any():
+    #     print("NaN detected in rot_x0")
+    # if torch.isnan(rot_x1).any():
+    #     print("NaN detected in rot_x1")
+    # if torch.isnan(log_x1).any():
+    #     print("NaN detected in log_x1")
     # Ensure t requires gradient for velocity computation
     t.requires_grad = True
 
     # Compute interpolated rotation at time t
     xt = vec_manifold.exp_not_from_identity(t.reshape(-1, 1) * log_x1, rot_x0)
     xt = vec_manifold.matrix_from_rotation_vector(xt)
+    
+    # #print(t.shape)
+    # if torch.isnan(xt).any():
+    #     print("NaN detected in xt")
 
     # Compute velocity field using automatic differentiation
     xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
+    #print(f"Max xt_flat: {xt_flat.abs().max().item()}")
 
+    # if torch.isnan(xt_flat).any():
+    #     print("NaN detected in xt_flat")
+    #     print("xt_flat values:", xt_flat)
+    #     raise ValueError("NaN detected in xt_flat, stopping computation.")
+
+    #torch.autograd.set_detect_anomaly(True)
     def index_time_der(i):
         return torch.autograd.grad(xt_flat, t, i, create_graph=True, retain_graph=True)[
             0
         ]
-
+    #print(log_x1 @ xt )
     xt_dot = vmap(index_time_der, in_dims=1)(
         torch.eye(9).to(xt.device).repeat(xt_flat.shape[0], 1, 1)
     )
+    #skew_v = vector_to_skew(log_x1)         # shape (B, 3, 3)
+    #skew_v = vec_manifold.matrix_from_rotation_vector(log_x1)
+    #print(skew_v.shape,xt.shape)
+    #xt_dot_manual = torch.einsum("bij,bjk->bik", xt, skew_v) 
+    #xt_dot_manual = torch.einsum("bij,bjk->bik", skew_v, xt)# shape (B, 3, 3)
     ut = rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
+    # Check if xt_dot and xt_dot_manual are close
+    # if torch.allclose(ut, xt_dot_manual, atol=1e-6):
+    #     #print("xt_dot and xt_dot_manual are close")
+    # else:
+    #     #print("xt_dot and xt_dot_manual are not close")
+    #     max_diff = torch.max(torch.abs(ut - xt_dot_manual))
+        #print(f"Max difference between ut and xt_dot_manual: {max_diff.item()}")
+        #print(f"Max value in ut: {torch.max(ut).item()}")
+        #print(f"Max value in xt_dot_manual: {torch.max(xt_dot_manual).item()}")
+    #print(xt_dot.shape)
+    #print((log_x1 @ xt).shape,xt.shape,log_x1.shape)
+    # Check if the matrices are close
+    # if torch.allclose(xt_dot, log_x1 @ xt, atol=1e-6):
+    #     #print("xt_dot and log_x1 @ xt are close")
+    # else:
+    #     #print("xt_dot and log_x1 @ xt are not close")
+    #torch.autograd.set_detect_anomaly(False)
 
+
+    # #Print statements to check for NaNs
+    # if torch.isnan(xt_dot).any():
+    #     #print("NaN detected in xt_dot")
+    #     #print(f"Max log_x1 @ xt: {(log_x1 @ xt).abs().max().item()}")
+        
+    #     ##print(xt)
+    # if torch.isnan(ut).any():
+    #     #print("NaN detected in ut")
     return xt, ut
 
 
@@ -210,3 +270,58 @@ def sample(
 
     # No need to reshape SO3 output as it's already in the correct shape
     return so3_traj, r3_traj
+
+
+def batch_vector_to_skew_symmetric(v: torch.Tensor) -> torch.Tensor:
+    """
+    Create skew-symmetric matrices from a batch of 3D vectors.
+
+    Args:
+        v: A tensor of shape (batch_size, 3)
+
+    Returns:
+        A tensor of skew-symmetric matrices of shape (batch_size, 3, 3)
+    """
+    assert v.shape[-1] == 3, "The last dimension of the input tensor must be 3"
+    
+    batch_size = v.shape[0]
+    
+    S = torch.zeros((batch_size, 3, 3), dtype=v.dtype, device=v.device)
+    
+    S[:, 0, 1] = -v[:, 2]
+    S[:, 0, 2] = v[:, 1]
+    S[:, 1, 0] = v[:, 2]
+    S[:, 1, 2] = -v[:, 0]
+    S[:, 2, 0] = -v[:, 1]
+    S[:, 2, 1] = v[:, 0]
+    
+    return S
+
+import torch
+
+def vector_to_skew(vec: torch.Tensor) -> torch.Tensor:
+    """
+    Convert a batch of 3D vectors into their corresponding
+    batch of 3x3 skew-symmetric matrices.
+
+    Args:
+        vec: shape (B, 3), i.e. each row is (v_x, v_y, v_z)
+
+    Returns:
+        skew: shape (B, 3, 3), where skew[i] is the 3x3
+              skew-symmetric matrix for vec[i].
+    """
+    if vec.ndim != 2 or vec.shape[-1] != 3:
+        raise ValueError("Expected vec to have shape (B, 3).")
+
+    vx, vy, vz = vec[:, 0], vec[:, 1], vec[:, 2]
+    zero = torch.zeros_like(vx)
+
+    # Construct row by row
+    row0 = torch.stack([ zero, -vz,   vy], dim=-1)  # [B, 3]
+    row1 = torch.stack([  vz,  zero, -vx], dim=-1)
+    row2 = torch.stack([-vy,   vx,   zero], dim=-1)
+
+    # Stack rows into a [B, 3, 3] tensor
+    skew = torch.stack([row0, row1, row2], dim=1)
+    return skew

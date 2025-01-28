@@ -56,8 +56,8 @@ class Lightning(pl.LightningModule):
         """
         # Sample synchronized time points for both manifolds
         
-        so3_inputs = self.model.duplicate_to_batch_size(so3_inputs,self.config.data.batch_size,self.config.training.duplicate_ratio)
-        r3_inputs = self.model.duplicate_to_batch_size(r3_inputs,self.config.data.batch_size,self.config.training.duplicate_ratio)
+        #so3_inputs = self.model.duplicate_to_batch_size(so3_inputs,self.config.data.batch_size,self.config.training.duplicate_ratio)
+        #r3_inputs = self.model.duplicate_to_batch_size(r3_inputs,self.config.data.batch_size,self.config.training.duplicate_ratio)
         t = torch.rand(r3_inputs.size(0), device=so3_inputs.device)
 
         # SO3 computation - already in [batch, 3, 3] format
@@ -68,8 +68,10 @@ class Lightning(pl.LightningModule):
         # Sample location and flow for SO
         xt_so3, ut_so3 = sample_location_and_conditional_flow(x0_so3, so3_inputs, t)
         # Both xt_so3 and ut_so3 are [batch, 3, 3]
-
-        # R3 computation with same time points
+        # if torch.isnan(xt_so3).any():
+        #     print('xt_so3 patlatiyor')# R3 computation with same time points
+        # if torch.isnan(ut_so3).any():
+        #     print('ut_so3 patlatiyor')# R3 computation with same time points
         t_expanded = t.unsqueeze(-1)  # [batch, 1]
         noise = torch.randn_like(r3_inputs)
 
@@ -109,6 +111,18 @@ class Lightning(pl.LightningModule):
 
     def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
         grasp_data = batch
+            # Check for NaNs in rotation
+        # if torch.isnan(grasp_data.rotation).any():
+        #     print(f"NaN detected in rotation at batch {batch_idx}")
+
+        # # Check for NaNs in translation
+        # if torch.isnan(grasp_data.translation).any():
+        #     print(f"NaN detected in translation at batch {batch_idx}")
+
+        # # Check for NaNs in sdf
+        # if torch.isnan(grasp_data.sdf).any():
+        #     print(f"NaN detected in sdf at batch {batch_idx}")
+
         loss, log_dict = self.compute_loss(
             grasp_data.rotation,
             grasp_data.translation,
