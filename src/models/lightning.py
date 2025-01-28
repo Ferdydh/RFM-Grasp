@@ -68,10 +68,7 @@ class Lightning(pl.LightningModule):
         # Sample location and flow for SO
         xt_so3, ut_so3 = sample_location_and_conditional_flow(x0_so3, so3_inputs, t)
         # Both xt_so3 and ut_so3 are [batch, 3, 3]
-        # if torch.isnan(xt_so3).any():
-        #     print('xt_so3 patlatiyor')# R3 computation with same time points
-        # if torch.isnan(ut_so3).any():
-        #     print('ut_so3 patlatiyor')# R3 computation with same time points
+
         t_expanded = t.unsqueeze(-1)  # [batch, 1]
         noise = torch.randn_like(r3_inputs)
 
@@ -111,17 +108,7 @@ class Lightning(pl.LightningModule):
 
     def training_step(self, batch: Tuple, batch_idx: int) -> Tensor:
         grasp_data = batch
-            # Check for NaNs in rotation
-        # if torch.isnan(grasp_data.rotation).any():
-        #     print(f"NaN detected in rotation at batch {batch_idx}")
 
-        # # Check for NaNs in translation
-        # if torch.isnan(grasp_data.translation).any():
-        #     print(f"NaN detected in translation at batch {batch_idx}")
-
-        # # Check for NaNs in sdf
-        # if torch.isnan(grasp_data.sdf).any():
-        #     print(f"NaN detected in sdf at batch {batch_idx}")
 
         loss, log_dict = self.compute_loss(
             grasp_data.rotation,
@@ -306,19 +293,9 @@ class Lightning(pl.LightningModule):
             torch.tensor(grasp_data.normalization_scale),
             self.config.training.num_samples_to_log,
             sdf_path=grasp_data.mesh_path,
-            # grasp_data.dataset_mesh_scale,
-            # grasp_data.normalization_scale
         )
         scene = self.compute_grasp_scene(grasp_data,(r3_output,so3_output))
-        # r3_output = denormalize_translation(r3_output, self.translation_norm_params)
-        # r3_output += grasp_data.centroid
 
-        # has_collision, scene, min_distance = check_collision_multiple_grasps(
-        #     so3_output,
-        #     r3_output,
-        #     grasp_data.mesh_path,
-        #     grasp_data.dataset_mesh_scale,
-        # )
 
         self.logger.experiment.log(
             {
@@ -346,7 +323,6 @@ class Lightning(pl.LightningModule):
             device=denormalized_translation.device
         )
         collision_function = check_collision_multiple_grasps if r3_so3_inputs else check_collision
-        #print(rotation.shape,final_translation.shape)
         _,scene,_ = collision_function(
             rotation,
             final_translation,

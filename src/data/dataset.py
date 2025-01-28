@@ -20,63 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 
-# @dataclass
-# class GraspData:
-#     rotation: torch.Tensor
-#     translation: torch.Tensor
-#     sdf: torch.Tensor
-#     mesh_path: str
-#     #norm_params: NormalizationParams
-#     dataset_mesh_scale: float
-#     normalization_scale: float
-#     centroid: np.ndarray
-    
 GraspData = namedtuple("GraspData", ["rotation", "translation", "sdf", "mesh_path", "dataset_mesh_scale", "normalization_scale", "centroid"])
 
 
-# def collate_grasp_data(batch: list[GraspData]):
-#     """
-#     Custom collate function that takes a list of GraspData objects
-#     and returns a dictionary of batched tensors and other fields.
-#     """
-#     rotations = []
-#     translations = []
-#     sdfs = []
-#     mesh_paths = []
-#     dataset_mesh_scales = []
-#     normalization_scales = []
-#     centroids = []
-
-#     # Extract each field from the dataclass and accumulate in lists
-#     for sample in batch:
-#         rotations.append(sample.rotation)
-#         translations.append(sample.translation)
-#         sdfs.append(sample.sdf)
-#         mesh_paths.append(sample.mesh_path)
-#         dataset_mesh_scales.append(sample.dataset_mesh_scale)
-#         normalization_scales.append(sample.normalization_scale)
-#         centroids.append(sample.centroid)
-
-#     # Convert lists of Tensors to a single batched Tensor
-#     rotations = torch.stack(rotations)       # shape: (B, 3, 3)
-#     translations = torch.stack(translations) # shape: (B, 3)
-#     sdfs = torch.stack(sdfs)                 # shape: (B, 48, 48, 48), etc.
-
-#     # For scales and centroids, either convert to Tensors or keep as lists:
-#     dataset_mesh_scales = torch.tensor(dataset_mesh_scales)  # shape: (B,)
-#     normalization_scales = torch.tensor(normalization_scales)# shape: (B,)
-#     centroids = torch.stack([torch.tensor(c) for c in centroids])  # shape: (B, 3)
-
-#     # Return a dictionary (or a new dataclass) with the collated batch
-#     return GraspData(
-#         "rotation": rotations,
-#         "translation": translations,
-#         "sdf": sdfs,
-#         "mesh_path": mesh_paths,  # list of strings
-#         "dataset_mesh_scale": dataset_mesh_scales,
-#         "normalization_scale": normalization_scales,
-#         "centroid": centroids,
-#     )
 
 
 class GraspDataset(Dataset):
@@ -218,98 +164,6 @@ class GraspDataset(Dataset):
             self.selected_indices = None
         
         
-        
-        
-                # We'll store results in a list the same length as self.grasp_files
-        #results = [None] * len(self.grasp_files)
-
-        # # 1. Create a list of arguments (one per file)
-        # process_args = [
-        #     (fname, self.data_root, self.sdf_size, os.path.join(self.data_root, "grasp_cache")) 
-        #     for fname in self.grasp_files
-        # ]
-
-        # # 2. Use ProcessPoolExecutor for CPU-bound parallelism
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=self.config.data.dataset_workers) as executor:
-        #     future_to_idx = {
-        #         executor.submit(self.process_one_file, arg_tuple): i
-        #         for i, arg_tuple in enumerate(process_args)
-        #     }
-        #     # Collect results as they complete
-        #     for future in concurrent.futures.as_completed(future_to_idx):
-        #         idx = future_to_idx[future]
-        #         results[idx] = future.result()
-
-        # # 3. Filter out Nones & gather global min/max
-        # valid_entries = [res for res in results if res is not None]
-        # if not valid_entries:
-        #     # edge case: no valid files
-        #     self.grasp_entries = []
-        #     self.total_grasps = 0
-        #     self.norm_params = NormalizationParams(torch.zeros(3), torch.ones(3))
-        #     return
-
-        # # Compute global min/max from all valid entries
-        # mins = [res[2] for res in valid_entries]  # local_min
-        # maxs = [res[3] for res in valid_entries]  # local_max
-        # global_min = np.min(mins, axis=0)
-        # global_max = np.max(maxs, axis=0)
-
-        # # 4. Reconstruct self.grasp_entries in order & update total_grasps
-        # self.grasp_entries = []
-        # total_grasps = 0
-        # for idx, res in enumerate(results):
-        #     if res is None:
-        #         # skip
-        #         continue
-        #     filename, entry, _, _, num_grasps = res
-        #     self.cache.cache[filename] = entry
-        #     self.grasp_entries.append(
-        #         (filename, total_grasps, total_grasps + num_grasps)
-        #     )
-        #     total_grasps += num_grasps
-
-        # self.total_grasps = total_grasps
-
-        # # 5. Normalization parameters
-        # self.norm_params = NormalizationParams(
-        #     min=torch.tensor(global_min), 
-        #     max=torch.tensor(global_max)
-        # )
-        # print("Calculated min/max values: ", global_min, global_max)
-
-        # for filename in self.grasp_files:
-        #     entry = self.cache.get_or_process(filename, data_root, sdf_size)
-        #     if  entry is None:
-        #         continue
-        #     num_grasps = len(entry.transforms)
-        #     self.grasp_entries.append(
-        #         (filename, total_grasps, total_grasps + num_grasps)
-        #     )
-        #     # Calculate min/max for normalization
-        #     translations = entry.transforms[:, :3, 3] 
-        #     if not hasattr(self, "trans_min"):
-        #         self.trans_min = translations.min(axis=0)
-        #         self.trans_max = translations.max(axis=0)
-        #     else:
-        #         self.trans_min = np.minimum(self.trans_min, translations.min(axis=0))
-        #         self.trans_max = np.maximum(self.trans_max, translations.max(axis=0))
-        #     total_grasps += num_grasps
-
-        # self.total_grasps = total_grasps
-
-        # self.norm_params = NormalizationParams(
-        #     min=torch.tensor(self.trans_min), max=torch.tensor(self.trans_max)
-        # )
-        # print("Calculated min_max values: ", self.trans_min, self.trans_max)
-
-        # # Sample if needed
-        # if num_samples and num_samples < self.total_grasps:
-        #     selected_indices = torch.randperm(self.total_grasps)[:num_samples]
-        #     self.selected_indices = sorted(selected_indices.tolist())
-        #     self.total_grasps = num_samples
-        # else:
-        #     self.selected_indices = None
 
     def __len__(self):
         return self.total_grasps
@@ -338,16 +192,6 @@ class GraspDataset(Dataset):
         )
         normalized_translation = normalize_translation(translation, self.norm_params)
 
-        # return {
-        #     'rotation':rotation,
-        #     'translation':normalized_translation,
-        #     'sdf':torch.tensor(entry.sdf),
-        #     'mesh_path':entry.mesh_path,
-        #     #norm_params:self.norm_params,
-        #     'dataset_mesh_scale':entry.dataset_mesh_scale,
-        #     'normalization_scale':entry.normalization_scale,
-        #     'centroid':entry.centroid,
-        # }
         return GraspData(
         rotation=rotation,
         translation=normalized_translation,

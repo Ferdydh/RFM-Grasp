@@ -103,24 +103,6 @@ def sample_location_and_conditional_flow(x0, x1, t):
     rot_x1 = rotmat_to_rotvec(x1)
     log_x1 = vec_manifold.log_not_from_identity(rot_x1, rot_x0)
 
-    # print(f"Max rot_x0: {rot_x0.abs().max().item()}")
-    # print(f"Max rot_x1: {rot_x1.abs().max().item()}")
-    # print(f"Max log_x1: {log_x1.abs().max().item()}")
-
-    
-    # if torch.norm(rot_x0 - rot_x1) < 1e-6:
-    #     print("x0 and x1 are too close, potential numerical instability")
-    #     log_x1 = torch.zeros_like(log_x1)  # Set tangent vector to zero
-    # if torch.norm(rot_x0 + rot_x1) < 1e-6:
-    #     print("x0 and x1 are antipodal, potential numerical instability")
-    #     log_x1 = torch.zeros_like(log_x1)  # Set tangent vector to zero
-    # # Print statements to check for NaNs
-    # if torch.isnan(rot_x0).any():
-    #     print("NaN detected in rot_x0")
-    # if torch.isnan(rot_x1).any():
-    #     print("NaN detected in rot_x1")
-    # if torch.isnan(log_x1).any():
-    #     print("NaN detected in log_x1")
     # Ensure t requires gradient for velocity computation
     t.requires_grad = True
 
@@ -128,61 +110,20 @@ def sample_location_and_conditional_flow(x0, x1, t):
     xt = vec_manifold.exp_not_from_identity(t.reshape(-1, 1) * log_x1, rot_x0)
     xt = vec_manifold.matrix_from_rotation_vector(xt)
     
-    # #print(t.shape)
-    # if torch.isnan(xt).any():
-    #     print("NaN detected in xt")
 
     # Compute velocity field using automatic differentiation
     xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
-    #print(f"Max xt_flat: {xt_flat.abs().max().item()}")
 
-    # if torch.isnan(xt_flat).any():
-    #     print("NaN detected in xt_flat")
-    #     print("xt_flat values:", xt_flat)
-    #     raise ValueError("NaN detected in xt_flat, stopping computation.")
-
-    #torch.autograd.set_detect_anomaly(True)
     def index_time_der(i):
         return torch.autograd.grad(xt_flat, t, i, create_graph=True, retain_graph=True)[
             0
         ]
-    #print(log_x1 @ xt )
     xt_dot = vmap(index_time_der, in_dims=1)(
         torch.eye(9).to(xt.device).repeat(xt_flat.shape[0], 1, 1)
     )
-    #skew_v = vector_to_skew(log_x1)         # shape (B, 3, 3)
-    #skew_v = vec_manifold.matrix_from_rotation_vector(log_x1)
-    #print(skew_v.shape,xt.shape)
-    #xt_dot_manual = torch.einsum("bij,bjk->bik", xt, skew_v) 
-    #xt_dot_manual = torch.einsum("bij,bjk->bik", skew_v, xt)# shape (B, 3, 3)
+
     ut = rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
-    # Check if xt_dot and xt_dot_manual are close
-    # if torch.allclose(ut, xt_dot_manual, atol=1e-6):
-    #     #print("xt_dot and xt_dot_manual are close")
-    # else:
-    #     #print("xt_dot and xt_dot_manual are not close")
-    #     max_diff = torch.max(torch.abs(ut - xt_dot_manual))
-        #print(f"Max difference between ut and xt_dot_manual: {max_diff.item()}")
-        #print(f"Max value in ut: {torch.max(ut).item()}")
-        #print(f"Max value in xt_dot_manual: {torch.max(xt_dot_manual).item()}")
-    #print(xt_dot.shape)
-    #print((log_x1 @ xt).shape,xt.shape,log_x1.shape)
-    # Check if the matrices are close
-    # if torch.allclose(xt_dot, log_x1 @ xt, atol=1e-6):
-    #     #print("xt_dot and log_x1 @ xt are close")
-    # else:
-    #     #print("xt_dot and log_x1 @ xt are not close")
-    #torch.autograd.set_detect_anomaly(False)
 
-
-    # #Print statements to check for NaNs
-    # if torch.isnan(xt_dot).any():
-    #     #print("NaN detected in xt_dot")
-    #     #print(f"Max log_x1 @ xt: {(log_x1 @ xt).abs().max().item()}")
-        
-    #     ##print(xt)
-    # if torch.isnan(ut).any():
-    #     #print("NaN detected in ut")
     return xt, ut
 
 

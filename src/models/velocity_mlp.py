@@ -27,7 +27,6 @@ class VelocityNetwork(nn.Module):
 
         # Input projection
         self.input_proj = nn.Linear(input_dim + voxel_output_size+1, hidden_dim)
-        # TODO Two linear layers back to back equivalent to one
         # Hidden layers
         layers = []
         layers.append(activation())
@@ -70,8 +69,7 @@ class VelocityNetwork(nn.Module):
             sdf_features = self.efficient_sdf_forward(sdf_inputs,sdf_path)
         else:
             sdf_features = self.sdf_encoder(sdf_inputs)
-        #dataset_mesh_scale = dataset_mesh_scale.unsqueeze(1)
-        #print(type(normalization_scale),normalization_scale.shape)
+
         normalization_scale = torch.atleast_1d(normalization_scale)  # Ensure tensor
         normalization_scale = normalization_scale.view(-1, 1)  # [batch_size, 1]
         normalization_scale = normalization_scale.to(device=so3_inputs.device, 
@@ -79,14 +77,11 @@ class VelocityNetwork(nn.Module):
         #print(sdf_features.shape)
         if sdf_features.shape[0] != so3_inputs.shape[0]:
             sdf_features = self.duplicate_to_batch_size(sdf_features,so3_inputs.shape[0])
-            #dataset_mesh_scale = self.duplicate_to_batch_size(dataset_mesh_scale,so3_inputs.shape[0])
             normalization_scale = self.duplicate_to_batch_size(normalization_scale,so3_inputs.shape[0])
-        # sdf_features = sdf_features.repeat(
-        #     so3_inputs.shape[0] // sdf_features.shape[0] + 1, 1
-        # )[: so3_inputs.shape[0]]
+
         # Flatten SO3 input for processing
         so3_flat = rearrange(so3_inputs, "b c d -> b (c d)")
-        #print(so3_flat.shape,sdf_features.shape,r3_inputs.shape,normalization_scale.shape)
+
         # Combine inputs
         x = torch.cat([sdf_features, so3_flat, r3_inputs,normalization_scale], dim=-1)
 
@@ -114,15 +109,6 @@ class VelocityNetwork(nn.Module):
 
         return so3_velocity, r3_velocity
 
-
-    # def efficient_forward(self, so3_input: Tensor,r3_input: Tensor,sdf_input: Tensor,sdf_path: Tuple[str],batch_size:int):
-        
-    #     so3_input = self.duplicate_to_batch_size(so3_input)
-    #     r3_input = self.duplicate_to_batch_size(r3_input)
-        
-        
-
-    # pass
 
 
     def duplicate_to_batch_size(self,input:Tensor,target_batch_size:int,duplicate_ratio:int = 1):
@@ -164,9 +150,7 @@ class VelocityNetwork(nn.Module):
         mapping = []
         for sdf_path in sdf_paths:
             mapping.append(filename_to_unique_idx[sdf_path])
-        #print(mapping)
         mapping = torch.tensor(mapping, dtype=torch.int)  # shape (N,)
-        #print(len(mapping))
         
         unique_batch = sdf_input[unique_indices]
         encoded_unique = self.sdf_encoder(unique_batch)

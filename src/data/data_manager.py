@@ -36,17 +36,10 @@ class GraspCache:
         self.cache: dict[str, GraspCacheEntry] = {}
         self._load()
         
-        # if self.cache_file.exists():
-        #     try:
-        #         with open(self.cache_file, "rb") as f:
-        #             self.cache = pickle.load(f)
-        #     except Exception as e:
-        #         logger.warning(f"Failed to load cache: {e}. Starting with empty cache.")
 
     def worker_process_one_file(self,arg_tuple):
         filename, data_root, sdf_size = arg_tuple
         
-        # Instead of `cache.get_or_process`, directly open the file, do the SDF, etc.
         # Return the processed data in memory (entry-like).
         
         full_path = os.path.join(data_root, "grasps", filename)
@@ -79,45 +72,6 @@ class GraspCache:
             "centroid": centroid,
         }
     
-    def build_cache_in_main(self, grasp_files, data_root, sdf_size, max_workers=4):
-        """
-        1. Load existing cache from disk (if exists).
-        2. Parallel process each file if needed.
-        3. Merge results into in-memory cache dict.
-        4. Write cache to disk once at the end.
-        """
-        # Step 1: Load existing cache
-        self._load()
-
-        # Filter out files that are already in the cache
-        results = [None] * len(grasp_files)
-        
-        files_to_process = [f for f in grasp_files if f not in self.cache]
-
-        # Step 2: Use concurrency for heavy-lifting
-
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            # Map function to each file
-            futures = {
-                executor.submit(self.worker_process_one_file, (filename, data_root, sdf_size)): filename
-                for filename in files_to_process
-            }
-
-            # Step 3: Merge results back into the cache in the MAIN PROCESS ONLY
-            for future in concurrent.futures.as_completed(futures):
-                filename = futures[future]
-                try:
-                    filename, result_dict = future.result()
-                    # If result_dict is None, skip
-                    if result_dict is not None:
-                        # create the entry
-                        entry = GraspCacheEntry(**result_dict)
-                        self.cache[filename] = entry
-                except Exception as e:
-                    logger.error(f"Error processing {filename}: {e}")
-        
-        # Step 4: Write once
-        self._save()
 
     def _load(self):
         """Load entire cache from pickle once. (Main process only)"""
@@ -135,62 +89,6 @@ class GraspCache:
                 pickle.dump(self.cache, f)
         except Exception as e:
             logger.error(f"Failed to save cache: {e}")
-
-
-
-    def get_or_process(
-        self, grasp_filename: str, data_root: str, sdf_size: int
-    ) -> Optional[GraspCacheEntry]:
-        """Get cached data or process and cache if not available."""
-        if grasp_filename in self.cache:
-            logger.info(f"Loading {grasp_filename} from cache")
-            return self.cache[grasp_filename]
-
-        logger.info(f"Processing {grasp_filename}")
-        
-        grasp_file = os.path.join(data_root, "grasps", grasp_filename)
-
-        with h5py.File(grasp_file, "r") as h5file:
-            transforms = h5file["grasps"]["transforms"][:]
-            grasp_success = h5file["grasps"]["qualities"]["flex"]["object_in_gripper"][
-                :
-            ]
-            transforms = transforms[grasp_success == 1]
-            if transforms.size == 0:
-                return None
-            mesh_fname = h5file["object/file"][()].decode("utf-8")
-            dataset_mesh_scale = h5file["object/scale"][()]
-
-            
-            
-        # Load and process mesh
-        mesh_path = os.path.join(data_root, mesh_fname)
-        mesh = trimesh.load(mesh_path)
-        mesh = mesh.apply_scale(dataset_mesh_scale)
-        mesh = enforce_trimesh(mesh)
-        # Compute SDF and transform grasps
-        sdf, normalization_scale, centroid = process_mesh_to_sdf(mesh, sdf_size)
-        print(transforms.shape,centroid.shape)
-        transforms[:, :3, 3] -= centroid
-        # Create and cache entry
-        entry = GraspCacheEntry(
-            sdf=sdf,
-            transforms=transforms,
-            dataset_mesh_scale=dataset_mesh_scale,
-            normalization_scale=normalization_scale,
-            mesh_path=mesh_path,
-            centroid=centroid,
-        )
-        self.cache[grasp_filename] = entry
-
-        # Save cache
-        try:
-            with open(self.cache_file, "wb") as f:
-                pickle.dump(self.cache, f)
-        except Exception as e:
-            logger.error(f"Failed to save cache: {e}")
-
-        return entry
 
     @staticmethod
     def process_one_file(args: Tuple[str, str, int]) -> Optional[Tuple[str, Optional[GraspCacheEntry], np.ndarray, np.ndarray, int]]:
