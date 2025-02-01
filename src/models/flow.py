@@ -7,6 +7,13 @@ from geomstats.geometry.special_orthogonal import SpecialOrthogonal
 
 from src.models.velocity_mlp import VelocityNetwork
 
+basis = torch.tensor(
+    [
+        [[0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+        [[0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+    ]
+)
 
 def rotmat_to_rotvec(matrix):
     """
@@ -81,6 +88,18 @@ def rotmat_to_rotvec(matrix):
 
     return scale[..., None] * quat[..., :3]
 
+# hat map from vector space R^3 to Lie algebra so(3)
+def my_hat(v):
+    return torch.einsum("...i,ijk->...jk", v, basis.to(v))
+
+
+def Log(R):
+    return rotmat_to_rotvec(R)
+
+
+# logarithmic map from SO(3) to so(3), this is the matrix logarithm
+def log(R):
+    return my_hat(Log(R))
 
 def sample_location_and_conditional_flow(x0, x1, t):
     """
@@ -101,29 +120,37 @@ def sample_location_and_conditional_flow(x0, x1, t):
     # Convert rotations to axis-angle representation and compute log map
     rot_x0 = rotmat_to_rotvec(x0)
     rot_x1 = rotmat_to_rotvec(x1)
-    log_x1 = vec_manifold.log_not_from_identity(rot_x1, rot_x0)
+    
+    
 
     # Ensure t requires gradient for velocity computation
     t.requires_grad = True
 
+
+    log_x1 = vec_manifold.log_not_from_identity(rot_x1, rot_x0)
+
     # Compute interpolated rotation at time t
     xt = vec_manifold.exp_not_from_identity(t.reshape(-1, 1) * log_x1, rot_x0)
     xt = vec_manifold.matrix_from_rotation_vector(xt)
+
+    delta_r = torch.transpose(x0, dim0=-2, dim1=-1) @ xt
+    ut = xt @ log(delta_r)/t[:, None, None]
+
+    # # Compute velocity field using automatic differentiation
+    # xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
+
+    # def index_time_der(i):
+    #     return torch.autograd.grad(xt_flat, t, i, create_graph=True, retain_graph=True)[
+    #         0
+    #     ]
+    # xt_dot = vmap(index_time_der, in_dims=1)(
+    #     torch.eye(9).to(xt.device).repeat(xt_flat.shape[0], 1, 1)
+    # )
+
+    # ut = rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
     
 
-    # Compute velocity field using automatic differentiation
-    xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
-
-    def index_time_der(i):
-        return torch.autograd.grad(xt_flat, t, i, create_graph=True, retain_graph=True)[
-            0
-        ]
-    xt_dot = vmap(index_time_der, in_dims=1)(
-        torch.eye(9).to(xt.device).repeat(xt_flat.shape[0], 1, 1)
-    )
-
-    ut = rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
-
+    
     return xt, ut
 
 

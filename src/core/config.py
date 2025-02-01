@@ -32,7 +32,7 @@ class MLPModelConfig:
 class DataConfig:
     data_path: str
     files: list[str]
-    sampler_opt: str
+    #sampler_opt: str
     batch_size: int = 32
     num_workers: int = 1
     sample_limit: Optional[int] = None
@@ -46,7 +46,7 @@ class DataConfig:
             files=["Xbox360_14e5dba73b283dc7fe0939859a0b15ea_0.0005312646125977.h5"],
             batch_size=8,
             sample_limit=1,
-            sampler_opt="repeat",
+            #sampler_opt="repeat",
         )
 
     @classmethod
@@ -57,7 +57,7 @@ class DataConfig:
             batch_size=8,
             sample_limit=10,
             split_ratio=0.8,
-            sampler_opt="repeat",
+            #sampler_opt="repeat",
         )
         
     @classmethod
@@ -69,7 +69,7 @@ class DataConfig:
             batch_size=8,
             sample_limit=10,
             split_ratio=0.8,
-            sampler_opt="repeat",
+            #sampler_opt="repeat",
         )
     
 
@@ -83,7 +83,7 @@ class DataConfig:
             data_path="data/",
             files=50,
             batch_size=8,
-            sampler_opt="repeat",
+            #sampler_opt="repeat",
         )
 
 @dataclass
