@@ -15,14 +15,44 @@ from src.data.data_manager import GraspCache
 import concurrent.futures
 from src.data.util import NormalizationParams, normalize_translation
 
+from torch.utils.data import Sampler
+from collections import defaultdict
+
+
+class MeshBatchSampler(Sampler):
+    def __init__(self, dataset):
+        self.mesh_paths = []
+        seen = set()
+        for idx in range(len(dataset)):
+            mesh_path = dataset[idx].mesh_path
+            if mesh_path not in seen:
+                self.mesh_paths.append(idx)
+                seen.add(mesh_path)
+
+    def __iter__(self):
+        for idx in self.mesh_paths:
+            yield [idx]  # Wrap in list since DataLoader expects an iterable
+
+    def __len__(self):
+        return len(self.mesh_paths)
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-
-GraspData = namedtuple("GraspData", ["rotation", "translation", "sdf", "mesh_path", "dataset_mesh_scale", "normalization_scale", "centroid"])
-
-
+GraspData = namedtuple(
+    "GraspData",
+    [
+        "rotation",
+        "translation",
+        "sdf",
+        "mesh_path",
+        "dataset_mesh_scale",
+        "normalization_scale",
+        "centroid",
+    ],
+)
 
 
 class GraspDataset(Dataset):
@@ -35,7 +65,6 @@ class GraspDataset(Dataset):
         num_samples: Optional[int] = None,
         sdf_size: int = 32,
         device: torch.device = torch.device("cpu"),
-        
     ):
         self.data_root = data_root
         self.sdf_size = sdf_size
@@ -56,11 +85,11 @@ class GraspDataset(Dataset):
             self.grasp_files = [f.name for f in selected_files]
         else:
             self.grasp_files = grasp_files
-        
+
         logger.info(f"Number of .h5 files to process: {len(self.grasp_files)}")
         results = [None] * len(self.grasp_files)
-        
-             # Decide which files need to be processed
+
+        # Decide which files need to be processed
         to_process = []
         for i, fname in enumerate(self.grasp_files):
             if fname in self.cache.cache:
@@ -79,29 +108,29 @@ class GraspDataset(Dataset):
             else:
                 # Not in cache => queue for processing
                 to_process.append((i, fname))
-        
-        
+
         if to_process:
             logger.info(f"Processing {len(to_process)} files in parallel.")
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=self.config.data.dataset_workers
             ) as executor:
-
                 future_to_idx = {}
-                for (i, fname) in to_process:
+                for i, fname in to_process:
                     args = (fname, self.data_root, self.sdf_size)
                     fut = executor.submit(self.cache.process_one_file, args)
                     future_to_idx[fut] = i
 
                 for fut in concurrent.futures.as_completed(future_to_idx):
                     i = future_to_idx[fut]
-                    res = fut.result()  # => (filename, entry, local_min, local_max, num_grasps) or None
+                    res = (
+                        fut.result()
+                    )  # => (filename, entry, local_min, local_max, num_grasps) or None
                     if res is None:
                         # Something failed => skip
                         results[i] = None
                     else:
                         results[i] = res
-        
+
         for i, out in enumerate(results):
             if out is None:
                 # either error or didn't exist => store as None in cache
@@ -112,10 +141,7 @@ class GraspDataset(Dataset):
                 # entry might be None if 0 transforms => also store None
                 self.cache.cache[fname] = entry
         self.cache._save()  # Write cache once
-        
-        
-        
-        
+
         self.grasp_entries = []
         self.trans_min = None
         self.trans_max = None
@@ -162,19 +188,17 @@ class GraspDataset(Dataset):
             self.total_grasps = num_samples
         else:
             self.selected_indices = None
-        
-        
 
     def __len__(self):
         return self.total_grasps
-
-
 
     def __getitem__(
         self, idx: int
     ) -> Tuple[
         torch.Tensor, torch.Tensor, torch.Tensor, str, NormalizationParams, float, float
     ]:
+        # print("getitem")
+
         if self.selected_indices is not None:
             idx = self.selected_indices[idx]
 
@@ -193,34 +217,13 @@ class GraspDataset(Dataset):
         normalized_translation = normalize_translation(translation, self.norm_params)
 
         return GraspData(
-        rotation=rotation,
-        translation=normalized_translation,
-        sdf=torch.tensor(entry.sdf),
-        mesh_path=entry.mesh_path,
-        dataset_mesh_scale=entry.dataset_mesh_scale,
-        normalization_scale=entry.normalization_scale,
-        centroid=entry.centroid,
-    )
-    def process_one_file(self,args):
-        """
-        This function is defined at the top level to be pickleable by multiprocessing.
-        Returns a tuple: (filename, entry, local_min, local_max, num_grasps) or None if entry fails.
-        """
-        (filename, data_root, sdf_size, cache_dir) = args
-        
-        cache = GraspCache(cache_dir)
-        entry = cache.get_or_process(filename, data_root, sdf_size)
-        if entry is None:
-            return None
-        
-        # local min/max
-        translations = entry.transforms[:, :3, 3]
-        return (
-            filename,
-            entry,
-            translations.min(axis=0),
-            translations.max(axis=0),
-            len(entry.transforms),
+            rotation=rotation,
+            translation=normalized_translation,
+            sdf=torch.tensor(entry.sdf),
+            mesh_path=entry.mesh_path,
+            dataset_mesh_scale=entry.dataset_mesh_scale,
+            normalization_scale=entry.normalization_scale,
+            centroid=entry.centroid,
         )
 
 
@@ -254,9 +257,8 @@ class DataModule(LightningDataModule):
                 self.config,
                 num_samples=self.num_samples,
                 device=self.device,
-                
             )
-            #self.full_dataset.check_for_nans()
+            # self.full_dataset.check_for_nans()
             self.save_used_files_to_json()
             # Calculate split sizes
             train_size = int(len(self.full_dataset) * self.split_ratio)
@@ -294,12 +296,31 @@ class DataModule(LightningDataModule):
             num_workers=self.num_workers,
             generator=torch.Generator(device=self.device),
         )
-    
+
+    def test_dataloader(self):
+        data = GraspDataset(
+            self.data_root,
+            self.grasp_files,
+            self.config,
+            num_samples=self.num_samples,
+            device=self.device,
+        )
+
+        return DataLoader(
+            dataset=data,
+            batch_sampler=MeshBatchSampler(data),
+            shuffle=False,
+            persistent_workers=True,
+            num_workers=15,
+            generator=torch.Generator(device=self.device),
+        )
+
     def save_used_files_to_json(self):
-        dirpath = self.config.training.checkpoint_dir + "/" + self.config.training.run_name
+        dirpath = (
+            self.config.training.checkpoint_dir + "/" + self.config.training.run_name
+        )
         os.makedirs(dirpath, exist_ok=True)  # Create the directory if it does not exist
 
         file_path = os.path.join(dirpath, "used_grasp_files.json")
-        with open(file_path, 'w') as file:
+        with open(file_path, "w") as file:
             json.dump(self.full_dataset.grasp_files, file, indent=4)
-

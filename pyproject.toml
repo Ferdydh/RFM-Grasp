@@ -8,6 +8,7 @@ dependencies = [
     "einops>=0.8.0",
     "geomstats[pytorch]>=2.8.0",
     "h5py>=3.12.1",
+    "ipykernel>=6.29.5",
     "mesh2sdf>=1.1.0",
     "pot>=0.9.5",
     "pyglet<2",

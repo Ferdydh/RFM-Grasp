@@ -139,6 +139,9 @@ def check_collision(
     """Checks for collisions between gripper and object."""
     # Load and scale object mesh
     object_mesh = trimesh.load(object_mesh_path)
+
+    if torch.is_tensor(mesh_scale):
+        mesh_scale = mesh_scale.cpu().numpy()
     object_mesh.apply_scale(mesh_scale)
 
     object_mesh = enforce_trimesh(object_mesh)
@@ -207,6 +210,9 @@ def check_collision_multiple_grasps(
     """
     # Load and scale object mesh
     object_mesh = trimesh.load(object_mesh_path)
+
+    if torch.is_tensor(mesh_scale):
+        mesh_scale = mesh_scale.cpu().numpy()
     object_mesh.apply_scale(mesh_scale)
     object_mesh = enforce_trimesh(object_mesh)
 

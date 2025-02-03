@@ -7,9 +7,10 @@ import sys
 import h5py
 import numpy as np
 import trimesh
-from typing import Optional,Tuple
+from typing import Optional, Tuple
 from src.data.util import enforce_trimesh, process_mesh_to_sdf
 import concurrent.futures
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class GraspCacheEntry:
     dataset_mesh_scale: float
     normalization_scale: float
     mesh_path: str
-    centroid: np.ndarray 
+    centroid: np.ndarray
 
 
 class GraspCache:
@@ -35,43 +36,6 @@ class GraspCache:
         self.cache_file = self.cache_dir / "grasp_cache.pkl"
         self.cache: dict[str, GraspCacheEntry] = {}
         self._load()
-        
-
-    def worker_process_one_file(self,arg_tuple):
-        filename, data_root, sdf_size = arg_tuple
-        
-        # Return the processed data in memory (entry-like).
-        
-        full_path = os.path.join(data_root, "grasps", filename)
-        with h5py.File(full_path, "r") as h5file:
-            transforms = h5file["grasps"]["transforms"][:]
-            grasp_success = h5file["grasps"]["qualities"]["flex"]["object_in_gripper"][:]
-            transforms = transforms[grasp_success == 1]
-            if transforms.size == 0:
-                return filename, None
-            mesh_fname = h5file["object/file"][()].decode("utf-8")
-            dataset_mesh_scale = h5file["object/scale"][()]
-
-        mesh_path = os.path.join(data_root, mesh_fname)
-        # Do heavy-lifting here: load mesh, compute SDF, etc.
-        mesh = trimesh.load(mesh_path)
-        mesh.apply_scale(dataset_mesh_scale)
-        mesh = enforce_trimesh(mesh)
-        sdf, normalization_scale, centroid = process_mesh_to_sdf(mesh, sdf_size)
-
-        # Adjust transforms
-        transforms[:, :3, 3] -= centroid
-
-        # Return enough info for the main process to build a GraspCacheEntry
-        return filename, {
-            "sdf": sdf,
-            "transforms": transforms,
-            "dataset_mesh_scale": dataset_mesh_scale,
-            "normalization_scale": normalization_scale,
-            "mesh_path": mesh_path,
-            "centroid": centroid,
-        }
-    
 
     def _load(self):
         """Load entire cache from pickle once. (Main process only)"""
@@ -91,7 +55,9 @@ class GraspCache:
             logger.error(f"Failed to save cache: {e}")
 
     @staticmethod
-    def process_one_file(args: Tuple[str, str, int]) -> Optional[Tuple[str, Optional[GraspCacheEntry], np.ndarray, np.ndarray, int]]:
+    def process_one_file(
+        args: Tuple[str, str, int],
+    ) -> Optional[Tuple[str, Optional[GraspCacheEntry], np.ndarray, np.ndarray, int]]:
         """
         Worker function to process a single .h5 file.
         Returns (filename, entry, local_min, local_max, num_grasps)
@@ -115,7 +81,7 @@ class GraspCache:
 
                 mesh_fname = h5file["object/file"][()].decode("utf-8")
                 dataset_mesh_scale = h5file["object/scale"][()]
-            
+
             mesh_path = os.path.join(data_root, mesh_fname)
             mesh = trimesh.load(mesh_path)
             mesh.apply_scale(dataset_mesh_scale)
@@ -145,7 +111,3 @@ class GraspCache:
         except Exception as e:
             logger.error(f"Failed to process {filename}: {e}")
             return None
-
-
-
-

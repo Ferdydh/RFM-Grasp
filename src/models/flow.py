@@ -132,9 +132,9 @@ def sample_location_and_conditional_flow(x0, x1, t):
     # Compute interpolated rotation at time t
     xt = vec_manifold.exp_not_from_identity(t.reshape(-1, 1) * log_x1, rot_x0)
     xt = vec_manifold.matrix_from_rotation_vector(xt)
-
+    epsilon = 1e-6
     delta_r = torch.transpose(x0, dim0=-2, dim1=-1) @ xt
-    ut = xt @ log(delta_r)/t[:, None, None]
+    ut = xt @ log(delta_r)/(t[:, None, None]+ epsilon)
 
     # # Compute velocity field using automatic differentiation
     # xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
