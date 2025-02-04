@@ -1,9 +1,9 @@
-from scipy.spatial.transform import Rotation
-from typing import Tuple, Optional  
+from typing import Optional, Tuple
+
 import torch
-from einops import rearrange
-from torch import Tensor, vmap
 from geomstats.geometry.special_orthogonal import SpecialOrthogonal
+from scipy.spatial.transform import Rotation
+from torch import Tensor
 
 from src.models.velocity_mlp import VelocityNetwork
 
@@ -14,6 +14,7 @@ basis = torch.tensor(
         [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
     ]
 )
+
 
 def rotmat_to_rotvec(matrix):
     """
@@ -88,6 +89,7 @@ def rotmat_to_rotvec(matrix):
 
     return scale[..., None] * quat[..., :3]
 
+
 # hat map from vector space R^3 to Lie algebra so(3)
 def my_hat(v):
     return torch.einsum("...i,ijk->...jk", v, basis.to(v))
@@ -100,6 +102,7 @@ def Log(R):
 # logarithmic map from SO(3) to so(3), this is the matrix logarithm
 def log(R):
     return my_hat(Log(R))
+
 
 def sample_location_and_conditional_flow(x0, x1, t):
     """
@@ -120,12 +123,9 @@ def sample_location_and_conditional_flow(x0, x1, t):
     # Convert rotations to axis-angle representation and compute log map
     rot_x0 = rotmat_to_rotvec(x0)
     rot_x1 = rotmat_to_rotvec(x1)
-    
-    
 
     # Ensure t requires gradient for velocity computation
     t.requires_grad = True
-
 
     log_x1 = vec_manifold.log_not_from_identity(rot_x1, rot_x0)
 
@@ -134,7 +134,7 @@ def sample_location_and_conditional_flow(x0, x1, t):
     xt = vec_manifold.matrix_from_rotation_vector(xt)
     epsilon = 1e-6
     delta_r = torch.transpose(x0, dim0=-2, dim1=-1) @ xt
-    ut = xt @ log(delta_r)/(t[:, None, None]+ epsilon)
+    ut = xt @ log(delta_r) / (t[:, None, None] + epsilon)
 
     # # Compute velocity field using automatic differentiation
     # xt_flat = rearrange(xt, "b c d -> b (c d)", c=3, d=3)
@@ -148,9 +148,7 @@ def sample_location_and_conditional_flow(x0, x1, t):
     # )
 
     # ut = rearrange(xt_dot, "(c d) b -> b c d", c=3, d=3)
-    
 
-    
     return xt, ut
 
 
@@ -178,7 +176,9 @@ def inference_step(
         Tuple of (next_so3_state, next_r3_state)
     """
     # Get velocities - model now expects [batch, 3, 3] input
-    so3_velocity, r3_velocity = model(so3_state, r3_state, sdf_input, t,normalization_scale, sdf_path)
+    so3_velocity, r3_velocity = model(
+        so3_state, r3_state, sdf_input, t, normalization_scale, sdf_path
+    )
 
     # R3 update remains the same
     r3_next = r3_state + dt * r3_velocity
@@ -233,7 +233,14 @@ def sample(
             torch.tensor([t_i], dtype=torch.float64).repeat(num_samples).to(device)
         )
         so3_traj, r3_traj = inference_step(
-            model, so3_traj, r3_traj, sdf_input,normalization_scale, t_batch, dt,sdf_path
+            model,
+            so3_traj,
+            r3_traj,
+            sdf_input,
+            normalization_scale,
+            t_batch,
+            dt,
+            sdf_path,
         )
 
     # No need to reshape SO3 output as it's already in the correct shape
@@ -251,21 +258,23 @@ def batch_vector_to_skew_symmetric(v: torch.Tensor) -> torch.Tensor:
         A tensor of skew-symmetric matrices of shape (batch_size, 3, 3)
     """
     assert v.shape[-1] == 3, "The last dimension of the input tensor must be 3"
-    
+
     batch_size = v.shape[0]
-    
+
     S = torch.zeros((batch_size, 3, 3), dtype=v.dtype, device=v.device)
-    
+
     S[:, 0, 1] = -v[:, 2]
     S[:, 0, 2] = v[:, 1]
     S[:, 1, 0] = v[:, 2]
     S[:, 1, 2] = -v[:, 0]
     S[:, 2, 0] = -v[:, 1]
     S[:, 2, 1] = v[:, 0]
-    
+
     return S
 
+
 import torch
+
 
 def vector_to_skew(vec: torch.Tensor) -> torch.Tensor:
     """
@@ -286,9 +295,9 @@ def vector_to_skew(vec: torch.Tensor) -> torch.Tensor:
     zero = torch.zeros_like(vx)
 
     # Construct row by row
-    row0 = torch.stack([ zero, -vz,   vy], dim=-1)  # [B, 3]
-    row1 = torch.stack([  vz,  zero, -vx], dim=-1)
-    row2 = torch.stack([-vy,   vx,   zero], dim=-1)
+    row0 = torch.stack([zero, -vz, vy], dim=-1)  # [B, 3]
+    row1 = torch.stack([vz, zero, -vx], dim=-1)
+    row2 = torch.stack([-vy, vx, zero], dim=-1)
 
     # Stack rows into a [B, 3, 3] tensor
     skew = torch.stack([row0, row1, row2], dim=1)

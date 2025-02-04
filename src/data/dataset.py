@@ -1,24 +1,26 @@
-from pytorch_lightning import LightningDataModule
+import concurrent.futures
+import json
+import logging
 import os
+import random
 from pathlib import Path
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader, dataset
-from typing import Optional, List, Tuple, Union
-import logging
-import random
-import json
-from dataclasses import dataclass
-from collections import namedtuple
+from pytorch_lightning import LightningDataModule
+from torch.utils.data import DataLoader, Dataset, Sampler, dataset
+
 from src.core.config import ExperimentConfig
 from src.data.data_manager import GraspCache
-import concurrent.futures
-from src.data.util import NormalizationParams, normalize_translation
+from src.data.util import GraspData, NormalizationParams, normalize_translation
 
-from torch.utils.data import Sampler
-from collections import defaultdict
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
+# Used so we can get only unique meshes.
+# So, each batch is just one sample with unique mesh.
 class MeshBatchSampler(Sampler):
     def __init__(self, dataset):
         self.mesh_paths = []
@@ -35,24 +37,6 @@ class MeshBatchSampler(Sampler):
 
     def __len__(self):
         return len(self.mesh_paths)
-
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
-GraspData = namedtuple(
-    "GraspData",
-    [
-        "rotation",
-        "translation",
-        "sdf",
-        "mesh_path",
-        "dataset_mesh_scale",
-        "normalization_scale",
-        "centroid",
-    ],
-)
 
 
 class GraspDataset(Dataset):
@@ -258,8 +242,21 @@ class DataModule(LightningDataModule):
                 num_samples=self.num_samples,
                 device=self.device,
             )
-            # self.full_dataset.check_for_nans()
-            self.save_used_files_to_json()
+
+            # Save to json
+            dirpath = (
+                self.config.training.checkpoint_dir
+                + "/"
+                + self.config.training.run_name
+            )
+            os.makedirs(
+                dirpath, exist_ok=True
+            )  # Create the directory if it does not exist
+
+            file_path = os.path.join(dirpath, "used_grasp_files.json")
+            with open(file_path, "w") as file:
+                json.dump(self.full_dataset.grasp_files, file, indent=4)
+
             # Calculate split sizes
             train_size = int(len(self.full_dataset) * self.split_ratio)
             val_size = len(self.full_dataset) - train_size
@@ -314,13 +311,3 @@ class DataModule(LightningDataModule):
             num_workers=15,
             generator=torch.Generator(device=self.device),
         )
-
-    def save_used_files_to_json(self):
-        dirpath = (
-            self.config.training.checkpoint_dir + "/" + self.config.training.run_name
-        )
-        os.makedirs(dirpath, exist_ok=True)  # Create the directory if it does not exist
-
-        file_path = os.path.join(dirpath, "used_grasp_files.json")
-        with open(file_path, "w") as file:
-            json.dump(self.full_dataset.grasp_files, file, indent=4)

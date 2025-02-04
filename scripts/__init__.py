@@ -1,8 +1,9 @@
 def initialize():
-    import os
-    import torch
     import multiprocessing
+    import os
+
     import pytorch_lightning as pl
+    import torch
 
     multiprocessing.set_start_method("spawn")
     os.environ["GEOMSTATS_BACKEND"] = "pytorch"

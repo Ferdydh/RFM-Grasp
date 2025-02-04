@@ -1,9 +1,10 @@
 from typing import List, Tuple, Union
+
+import numpy as np
 import torch
 import trimesh
-import numpy as np
-from scipy.spatial import cKDTree
 import wandb
+from scipy.spatial import cKDTree
 
 from src.data.util import enforce_trimesh
 
@@ -136,77 +137,19 @@ def check_collision(
     object_mesh_path: str,
     mesh_scale: float,
 ) -> Tuple[bool, trimesh.Scene, float]:
-    """Checks for collisions between gripper and object."""
-    # Load and scale object mesh
-    object_mesh = trimesh.load(object_mesh_path)
-
-    if torch.is_tensor(mesh_scale):
-        mesh_scale = mesh_scale.cpu().numpy()
-    object_mesh.apply_scale(mesh_scale)
-
-    object_mesh = enforce_trimesh(object_mesh)
-    # object_mesh.vertices = object_mesh.vertices - object_mesh.centroid
-
-    # Create transformation matrix
-    gripper_transform = torch.eye(4)
-    gripper_transform[:3, :3] = rotation_matrix[:3, :3]
-    gripper_transform[:3, 3] = translation_vector.squeeze()
-    gripper_transform = gripper_transform.cpu().numpy()
-
-    # Create and transform gripper mesh
-    gripper_mesh = create_parallel_gripper_mesh(color=[0, 255, 0])
-    gripper_mesh.apply_transform(gripper_transform)
-
-    # Print bounding boxes for debugging
-    # print("Gripper bounds:", gripper_mesh.bounds)
-    # if isinstance(object_mesh, trimesh.Scene):
-    #     combined_bounds = np.array(
-    #         [[np.inf, np.inf, np.inf], [-np.inf, -np.inf, -np.inf]]
-    #     )
-    #     for geom in object_mesh.geometry.values():
-    #         if isinstance(geom, trimesh.Trimesh):
-    #             combined_bounds[0] = np.minimum(combined_bounds[0], geom.bounds[0])
-    #             combined_bounds[1] = np.maximum(combined_bounds[1], geom.bounds[1])
-    #     print("Object bounds (combined):", combined_bounds)
-    # else:
-    #     print("Object bounds:", object_mesh.bounds)
-
-    # Check collision
-    has_collision, min_distance = _check_mesh_collision(gripper_mesh, object_mesh)
-
-    # Update visualization color
-    color = [255, 0, 0] if has_collision else [0, 255, 0]
-    gripper_mesh.visual.face_colors = color
-
-    # Create visualization
-    if isinstance(object_mesh, trimesh.Scene):
-        scene = object_mesh
-        scene.add_geometry(gripper_mesh)
-    else:
-        scene = trimesh.Scene([object_mesh, gripper_mesh])
-
-    return has_collision, scene, min_distance
-
-
-def check_collision_multiple_grasps(
-    rotation_matrix: torch.Tensor,
-    translation_vector: torch.Tensor,
-    object_mesh_path: str,
-    mesh_scale: float,
-) -> Tuple[bool, trimesh.Scene, float]:
-    """Checks for collisions between multiple gripper poses and object.
+    """Checks for collisions between one or multiple gripper poses and object.
 
     Args:
-        rotation_matrix: Batch of rotation matrices (batch_size, 3, 3)
-        translation_vector: Batch of translation vectors (batch_size, 3)
+        rotation_matrix: Single or batch of rotation matrices with shape (3, 3) or (N, 3, 3)
+        translation_vector: Single or batch of translation vectors with shape (3,) or (N, 3)
         object_mesh_path: Path to object mesh file
         mesh_scale: Scale factor for object mesh
 
     Returns:
         Tuple containing:
         - bool: True if any gripper has collision
-        - trimesh.Scene: Scene with object and all gripper meshes
-        - float: Minimum distance across all gripper-object pairs
+        - trimesh.Scene: Scene with object and gripper mesh(es)
+        - float: Minimum distance between gripper(s) and object
     """
     # Load and scale object mesh
     object_mesh = trimesh.load(object_mesh_path)
@@ -216,23 +159,37 @@ def check_collision_multiple_grasps(
     object_mesh.apply_scale(mesh_scale)
     object_mesh = enforce_trimesh(object_mesh)
 
-    # Create transformation matrix
+    # Check if rotation matrix is SO3 (3x3) or batched (Nx3x3)
+    is_so3 = rotation_matrix.shape == torch.Size([3, 3])
+    if is_so3:
+        rotation_matrix = rotation_matrix.unsqueeze(0)
+        translation_vector = translation_vector.unsqueeze(0)
+
+    # Validate shapes
+    assert len(rotation_matrix.shape) == 3 and rotation_matrix.shape[1:] == (3, 3), (
+        f"Expected rotation matrix shape (N, 3, 3), got {rotation_matrix.shape}"
+    )
+    assert len(translation_vector.shape) == 2 and translation_vector.shape[1] == 3, (
+        f"Expected translation vector shape (N, 3), got {translation_vector.shape}"
+    )
+    assert rotation_matrix.shape[0] == translation_vector.shape[0], (
+        f"Batch sizes don't match: {rotation_matrix.shape[0]} != {translation_vector.shape[0]}"
+    )
+
     batch_size = rotation_matrix.shape[0]
     gripper_meshes = []
     has_any_collision = False
     min_distance_overall = float("inf")
 
+    # Process each grasp
     for batch_idx in range(batch_size):
-        # Extract single sample from batch
-        so3_sample = rotation_matrix[batch_idx]
-        r3_sample = translation_vector[batch_idx]
-
+        # Create transformation matrix
         gripper_transform = torch.eye(4)
-        gripper_transform[:3, :3] = so3_sample[:3, :3]
-        gripper_transform[:3, 3] = r3_sample.squeeze()
+        gripper_transform[:3, :3] = rotation_matrix[batch_idx]
+        gripper_transform[:3, 3] = translation_vector[batch_idx]
         gripper_transform = gripper_transform.cpu().numpy()
 
-        # Create new gripper mesh for each sample
+        # Create and transform gripper mesh
         gripper_mesh = create_parallel_gripper_mesh(color=[0, 255, 0])
         gripper_mesh.apply_transform(gripper_transform)
 
@@ -247,16 +204,14 @@ def check_collision_multiple_grasps(
         color = [255, 0, 0] if has_collision else [0, 255, 0]
         gripper_mesh.visual.face_colors = color
 
-        # Store the gripper mesh
         gripper_meshes.append(gripper_mesh)
 
-    # Create visualization with all gripper meshes
+    # Create visualization
     if isinstance(object_mesh, trimesh.Scene):
         scene = object_mesh
         for gripper_mesh in gripper_meshes:
             scene.add_geometry(gripper_mesh)
     else:
-        # Convert list of meshes to include object and all grippers
         all_meshes = [object_mesh] + gripper_meshes
         scene = trimesh.Scene(all_meshes)
 

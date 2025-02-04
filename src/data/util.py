@@ -1,15 +1,29 @@
 import logging
+from collections import namedtuple
 from typing import Tuple
+
 import mesh2sdf
 import numpy as np
-import trimesh
-from collections import namedtuple
 import torch
+import trimesh
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 NormalizationParams = namedtuple("NormalizationParams", ["min", "max"])
+
+GraspData = namedtuple(
+    "GraspData",
+    [
+        "rotation",
+        "translation",
+        "sdf",
+        "mesh_path",
+        "dataset_mesh_scale",
+        "normalization_scale",
+        "centroid",
+    ],
+)
 
 
 def normalize_translation(

@@ -1,15 +1,15 @@
-from dataclasses import dataclass
 import logging
 import os
-from pathlib import Path
 import pickle
-import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Tuple
+
 import h5py
 import numpy as np
 import trimesh
-from typing import Optional, Tuple
+
 from src.data.util import enforce_trimesh, process_mesh_to_sdf
-import concurrent.futures
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

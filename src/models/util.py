@@ -1,5 +1,7 @@
 import torch
 
+from src.data.util import GraspData
+
 
 def duplicate_batch_to_size(batch):
     """
@@ -60,3 +62,15 @@ def duplicate_batch_to_size(batch):
         return type(batch)(duplicate_batch_to_size(x) for x in batch)
 
     raise TypeError(f"Unsupported batch type: {type(batch)}")
+
+
+def get_grasp_from_batch(batch, idx=0):
+    return GraspData(
+        rotation=batch.rotation[idx],
+        translation=batch.translation[idx],
+        sdf=batch.sdf[idx],
+        mesh_path=batch.mesh_path[idx],
+        dataset_mesh_scale=batch.dataset_mesh_scale[idx],
+        normalization_scale=batch.normalization_scale[idx],
+        centroid=batch.centroid[idx],
+    )

@@ -1,17 +1,17 @@
-from dataclasses import asdict
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import (
-    ModelCheckpoint,
-    LearningRateMonitor,
-    EarlyStopping,
-)
-import wandb
 import atexit
+from dataclasses import asdict
 
-from src.data.dataset import DataModule
+import pytorch_lightning as pl
+import wandb
+from pytorch_lightning.callbacks import (
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
+from pytorch_lightning.loggers import WandbLogger
 
 from src.core.config import ExperimentConfig
+from src.data.dataset import DataModule
 
 
 def cleanup_wandb():
@@ -76,7 +76,8 @@ def train(
             logger=wandb_logger,
             callbacks=callbacks,
             max_epochs=config.training.max_epochs,
-            accelerator="auto",
+            # accelerator="auto",
+            accelerator="cpu",
             devices="auto",
             precision=config.training.precision,
             gradient_clip_val=config.training.gradient_clip_val,

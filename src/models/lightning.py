@@ -1,38 +1,19 @@
-# from src.models.util import duplicate_batch_to_size
-import torch.nn.functional as F
-from einops import rearrange
-from scipy.spatial.transform import Rotation
-from typing import Tuple, Dict, Optional
+from typing import Dict, Optional, Tuple
+
 import pytorch_lightning as pl
 import torch
-from torch import Tensor
+import torch.nn.functional as F
 import wandb
-from torch.utils.data import DataLoader
+from einops import rearrange
+from scipy.spatial.transform import Rotation
+from torch import Tensor
 
-
-from src.data.util import denormalize_translation
 from src.core.config import ExperimentConfig
-from src.core.visualize import (
-    check_collision,
-    check_collision_multiple_grasps,
-    scene_to_wandb_3d,
-)
+from src.core.visualize import check_collision, scene_to_wandb_3d
+from src.data.util import GraspData, denormalize_translation
 from src.models.flow import sample, sample_location_and_conditional_flow
+from src.models.util import get_grasp_from_batch
 from src.models.velocity_mlp import VelocityNetwork
-from src.models.wasserstein import wasserstein_distance
-from src.data.dataset import GraspData
-
-
-def get_grasp_from_batch(batch, idx=0):
-    return GraspData(
-        rotation=batch.rotation[idx],
-        translation=batch.translation[idx],
-        sdf=batch.sdf[idx],
-        mesh_path=batch.mesh_path[idx],
-        dataset_mesh_scale=batch.dataset_mesh_scale[idx],
-        normalization_scale=batch.normalization_scale[idx],
-        centroid=batch.centroid[idx],
-    )
 
 
 class Lightning(pl.LightningModule):
@@ -144,7 +125,28 @@ class Lightning(pl.LightningModule):
         if (batch_idx % self.config.training.sample_interval == 0) and (
             batch_idx // self.config.training.sample_interval >= 1
         ):
-            self.sample_and_log()
+            random_idx = torch.randint(
+                0, len(self.trainer.train_dataloader.dataset), (1,)
+            )
+            grasp_data = self.trainer.train_dataloader.dataset[random_idx]
+
+            sdf_input = rearrange(grasp_data.sdf, "... -> 1 1 ...")
+
+            so3_output, r3_output = sample(
+                self.model,
+                sdf_input,
+                grasp_data.translation.device,
+                torch.tensor(grasp_data.normalization_scale),
+                self.config.training.num_samples_to_log,
+                sdf_path=grasp_data.mesh_path,
+            )
+            scene = self.compute_grasp_scene(grasp_data, (r3_output, so3_output))
+
+            self.logger.experiment.log(
+                {
+                    f"train/generated_grasp": scene_to_wandb_3d(scene),
+                }
+            )
 
         return loss
 
@@ -296,28 +298,6 @@ class Lightning(pl.LightningModule):
 
         return duplicated
 
-    def sample_and_log(self):
-        random_idx = torch.randint(0, len(self.trainer.train_dataloader.dataset), (1,))
-        grasp_data = self.trainer.train_dataloader.dataset[random_idx]
-
-        sdf_input = rearrange(grasp_data.sdf, "... -> 1 1 ...")
-
-        so3_output, r3_output = sample(
-            self.model,
-            sdf_input,
-            grasp_data.translation.device,
-            torch.tensor(grasp_data.normalization_scale),
-            self.config.training.num_samples_to_log,
-            sdf_path=grasp_data.mesh_path,
-        )
-        scene = self.compute_grasp_scene(grasp_data, (r3_output, so3_output))
-
-        self.logger.experiment.log(
-            {
-                f"train/generated_grasp": scene_to_wandb_3d(scene),
-            }
-        )
-
     def compute_grasp_scene(
         self,
         grasp_data: GraspData,
@@ -337,10 +317,7 @@ class Lightning(pl.LightningModule):
         final_translation = denormalized_translation + torch.tensor(
             grasp_data.centroid, device=denormalized_translation.device
         )
-        collision_function = (
-            check_collision_multiple_grasps if r3_so3_inputs else check_collision
-        )
-        _, scene, _ = collision_function(
+        _, scene, _ = check_collision(
             rotation,
             final_translation,
             grasp_data.mesh_path,

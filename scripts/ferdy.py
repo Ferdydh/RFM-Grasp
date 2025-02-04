@@ -4,8 +4,8 @@ if __name__ == "__main__":
     initialize()
 
     from src.core.config import DataConfig, ExperimentConfig
-    from src.models import lightning
     from src.core.train import train
+    from src.models import lightning
 
     config: ExperimentConfig = ExperimentConfig.default_mlp()
     config.data = DataConfig.sanity()
