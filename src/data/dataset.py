@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import random
+import pickle
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -127,10 +128,10 @@ class GraspDataset(Dataset):
         self.cache._save()  # Write cache once
 
         self.grasp_entries = []
-        self.trans_min = None
-        self.trans_max = None
+        
         total_grasps = 0
-
+        # self.trans_min = None
+        # self.trans_max = None
         for out in results:
             if (out is None) or (out[1] is None):
                 # skip
@@ -139,12 +140,12 @@ class GraspDataset(Dataset):
             # self.grasp_entries: (filename, start_idx, end_idx)
             self.grasp_entries.append((fname, total_grasps, total_grasps + num_grasps))
 
-            if self.trans_min is None:
-                self.trans_min = local_min
-                self.trans_max = local_max
-            else:
-                self.trans_min = np.minimum(self.trans_min, local_min)
-                self.trans_max = np.maximum(self.trans_max, local_max)
+            # if self.trans_min is None:
+            #     self.trans_min = local_min
+            #     self.trans_max = local_max
+            # else:
+            #     self.trans_min = np.minimum(self.trans_min, local_min)
+            #     self.trans_max = np.maximum(self.trans_max, local_max)
 
             total_grasps += num_grasps
 
@@ -152,19 +153,21 @@ class GraspDataset(Dataset):
         if total_grasps == 0:
             logger.warning("No valid grasps found in all files.")
 
-        # Build normalization params
-        if self.trans_min is not None and self.trans_max is not None:
-            self.norm_params = NormalizationParams(
-                min=torch.tensor(self.trans_min, dtype=torch.float32),
-                max=torch.tensor(self.trans_max, dtype=torch.float32),
-            )
-            logger.info(f"Global min: {self.trans_min}, max: {self.trans_max}")
-        else:
-            self.norm_params = NormalizationParams(
-                min=torch.zeros(3),
-                max=torch.ones(3),
-            )
 
+
+        # if self.trans_min is not None and self.trans_max is not None:
+        #     self.norm_params = NormalizationParams(
+        #         min=torch.tensor(self.trans_min, dtype=torch.float32),
+        #         max=torch.tensor(self.trans_max, dtype=torch.float32),
+        #     )
+        #     logger.info(f"Global min: {self.trans_min}, max: {self.trans_max}")
+        # else:
+        #     self.norm_params = NormalizationParams(
+        #         min=torch.zeros(3),
+        #         max=torch.ones(3),
+        #     )
+
+        self.norm_params = self._load_or_compute_norm_params(results)
         # Optionally sample a subset
         if num_samples and num_samples < self.total_grasps:
             chosen = torch.randperm(self.total_grasps)[:num_samples]
@@ -209,6 +212,49 @@ class GraspDataset(Dataset):
             normalization_scale=entry.normalization_scale,
             centroid=entry.centroid,
         )
+    def _load_or_compute_norm_params(
+        self,
+        concurrency_results: List[Tuple[str, ...]]
+        ) -> NormalizationParams:
+        """
+        If `config.data.translation_norm_param_path` is provided, load that file.
+        Otherwise, compute min/max from `concurrency_results`.
+        """
+        # 1. If path provided => load directly
+        if self.config.data.translation_norm_param_path is not None:
+            with open(self.config.data.translation_norm_param_path, "rb") as f:
+                norm_params = pickle.load(f)
+            logger.info(f"Loaded normalization parameters from {self.config.data.translation_norm_param_path}")
+            return norm_params
+
+        # 2. Otherwise => compute min/max from concurrency_results
+        trans_min, trans_max = None, None
+        for out in concurrency_results:
+            if out is None or out[1] is None:
+                # skip
+                continue
+            _, _, local_min, local_max, _ = out
+            if trans_min is None:
+                trans_min, trans_max = local_min, local_max
+            else:
+                trans_min = np.minimum(trans_min, local_min)
+                trans_max = np.maximum(trans_max, local_max)
+
+        if trans_min is None or trans_max is None:
+            # Fallback if no valid grasps
+            logger.warning("No valid grasps found for computing normalization. Using defaults.")
+            return NormalizationParams(
+                min=torch.zeros(3),
+                max=torch.ones(3),
+            )
+
+        logger.info(f"Global min: {trans_min}, max: {trans_max}")
+        return NormalizationParams(
+            min=torch.tensor(trans_min, dtype=torch.float32),
+            max=torch.tensor(trans_max, dtype=torch.float32),
+        )
+        
+
 
 
 class DataModule(LightningDataModule):
@@ -253,11 +299,16 @@ class DataModule(LightningDataModule):
                 dirpath, exist_ok=True
             )  # Create the directory if it does not exist
 
-            file_path = os.path.join(dirpath, "used_grasp_files.json")
-            with open(file_path, "w") as file:
+            used_grasps_file_path = os.path.join(dirpath, "used_grasp_files.json")
+            with open(used_grasps_file_path, "w") as file:
                 json.dump(self.full_dataset.grasp_files, file, indent=4)
+            
+            used_norm_params_file_path = os.path.join(dirpath, "used_norm_params.pkl")
+            with open(used_norm_params_file_path, "wb") as file:
+                pickle.dump(self.full_dataset.norm_params, file)
+            
 
-            # Calculate split sizes
+            # Calculate split sizes 
             train_size = int(len(self.full_dataset) * self.split_ratio)
             val_size = len(self.full_dataset) - train_size
 

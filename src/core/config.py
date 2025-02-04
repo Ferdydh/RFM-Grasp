@@ -38,6 +38,8 @@ class DataConfig:
     sample_limit: Optional[int] = None
     split_ratio: float = 0.9  # Train-Val split ratio of 90-10%
     dataset_workers: int = 1
+    translation_norm_param_path: Optional[str] = None
+    
 
     @classmethod
     def sanity(cls) -> "DataConfig":
