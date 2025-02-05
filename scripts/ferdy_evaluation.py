@@ -44,6 +44,9 @@ if __name__ == "__main__":
     config.data.sample_limit = None
     config.data.files = unused_files
     config.data.translation_norm_param_path = "logs/checkpoints/used_norm_params.pkl"
+    #     config.data.translation_norm_param_path = (
+    #     "logs/checkpoints/run_20250204_204207/used_norm_params.pkl"
+    # )
 
     # config.data.files = [
     #     # "Pizza_caca4c8d409cddc66b04c0f74e5b376e_0.0065985560890656995.h5",
