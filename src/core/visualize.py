@@ -1,5 +1,6 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
+import numpy as np
 import torch
 import trimesh
 import wandb
@@ -59,12 +60,35 @@ def create_parallel_gripper_mesh(
     return gripper_mesh
 
 
+def create_grasp_volume(
+    gripper_width: float = 0.082,
+    gripper_height: float = 0.11217,
+    base_height: float = 0.066,
+) -> trimesh.Trimesh:
+    """Creates a box mesh representing the volume between gripper fingers."""
+    # Create a box that spans between the fingers
+    grasp_box = trimesh.creation.box(
+        extents=[
+            gripper_width,  # Width between fingers
+            0.02,  # Thickness (a bit thicker than fingers for safety)
+            gripper_height - base_height,  # Height of fingers
+        ]
+    )
+
+    # Move the box to the correct position (centered between fingers, at the right height)
+    transform = np.eye(4)
+    transform[2, 3] = base_height + (gripper_height - base_height) / 2
+    grasp_box.apply_transform(transform)
+
+    return grasp_box
+
+
 def check_collision(
     rotation_matrix: torch.Tensor,
     translation_vector: torch.Tensor,
     object_mesh_path: str,
     mesh_scale: float,
-) -> Tuple[bool, trimesh.Scene, float]:
+) -> Tuple[bool, trimesh.Scene, float, bool]:
     """Checks for collisions between gripper poses and object using trimesh's CollisionManager.
 
     Args:
@@ -124,13 +148,25 @@ def check_collision(
         gripper_mesh = create_parallel_gripper_mesh(color=[0, 255, 0])
         gripper_mesh.apply_transform(gripper_transform)
 
-        # Create collision manager for this gripper
+        # Create and transform grasp volume mesh
+        grasp_volume = create_grasp_volume()
+        grasp_volume.apply_transform(gripper_transform)
+
+        # Create collision managers
         gripper_manager = CollisionManager()
         gripper_manager.add_object("gripper", gripper_mesh)
 
-        # Check collision
+        volume_manager = CollisionManager()
+        volume_manager.add_object("grasp_volume", grasp_volume)
+
+        # Check gripper collision
         has_collision, _, _ = object_manager.in_collision_other(
             gripper_manager, return_names=True, return_data=True
+        )
+
+        # Check if object is between fingers
+        is_graspable, _, _ = object_manager.in_collision_other(
+            volume_manager, return_names=True, return_data=True
         )
 
         # Get minimum distance
@@ -142,10 +178,18 @@ def check_collision(
         has_any_collision = has_any_collision or has_collision
         min_distance_overall = min(min_distance_overall, min_distance)
 
-        # Update visualization color
-        color = [255, 0, 0] if has_collision else [0, 255, 0]
-        gripper_mesh.visual.face_colors = color
+        # Update visualization color based on both collision and graspability
+        # Red: Collision
+        # Green: Valid grasp (no collision and object is between fingers)
+        # Yellow: No collision but object not between fingers
+        if has_collision:
+            color = [255, 0, 0]  # Red
+        elif is_graspable:
+            color = [0, 255, 0]  # Green
+        else:
+            color = [255, 255, 0]  # Yellow
 
+        gripper_mesh.visual.face_colors = color
         gripper_meshes.append(gripper_mesh)
 
     # Create visualization
@@ -157,7 +201,7 @@ def check_collision(
         all_meshes = [object_mesh] + gripper_meshes
         scene = trimesh.Scene(all_meshes)
 
-    return has_any_collision, scene, min_distance_overall
+    return has_any_collision, scene, min_distance_overall, is_graspable
 
 
 def scene_to_wandb_3d(scene: trimesh.Scene) -> wandb.Object3D:

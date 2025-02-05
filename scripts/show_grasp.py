@@ -57,7 +57,7 @@ if __name__ == "__main__":
     print("Mesh Path:", mesh_path)
     print("Dataset Mesh Scale:", dataset_mesh_scale)
 
-    has_collision, scene, min_distance = check_collision(
+    has_collision, scene, min_distance, is_graspable = check_collision(
         so3_input,
         r3_input,
         mesh_path,

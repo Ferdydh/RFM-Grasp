@@ -317,7 +317,7 @@ class Lightning(pl.LightningModule):
         final_translation = denormalized_translation + torch.tensor(
             grasp_data.centroid, device=denormalized_translation.device
         )
-        _, scene, _ = check_collision(
+        has_collision, scene, min_distance, is_graspable = check_collision(
             rotation,
             final_translation,
             grasp_data.mesh_path,
