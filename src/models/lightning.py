@@ -326,7 +326,7 @@ class Lightning(pl.LightningModule):
         return scene
 
     def test_step(self, batch, batch_idx: int):
-        print("called")
+        # print("called")
 
         grasp_data = get_grasp_from_batch(batch)
 
@@ -340,9 +340,9 @@ class Lightning(pl.LightningModule):
             self.config.training.num_samples_to_log,
             sdf_path=grasp_data.mesh_path,
         )
-        print("grasp_data", grasp_data)
-        print("r3_output", r3_output)
-        print("so3_output", so3_output)
+        # print("grasp_data", grasp_data)
+        # print("r3_output", r3_output)
+        # print("so3_output", so3_output)
 
         scene = self.compute_grasp_scene(grasp_data, (r3_output, so3_output))
 

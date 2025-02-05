@@ -1,4 +1,6 @@
+import io
 import logging
+import pickle
 from collections import namedtuple
 from typing import Tuple
 
@@ -96,3 +98,11 @@ def process_mesh_to_sdf(
     sdf = mesh2sdf.compute(mesh.vertices, mesh.faces, size, fix=True, level=level)
 
     return sdf, normalization_scale, centroid
+
+
+class CPU_Unpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == "torch.storage" and name == "_load_from_bytes":
+            return lambda b: torch.load(io.BytesIO(b), map_location="cpu")
+        else:
+            return super().find_class(module, name)

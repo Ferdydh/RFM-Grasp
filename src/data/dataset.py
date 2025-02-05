@@ -2,8 +2,8 @@ import concurrent.futures
 import json
 import logging
 import os
-import random
 import pickle
+import random
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -14,7 +14,12 @@ from torch.utils.data import DataLoader, Dataset, Sampler, dataset
 
 from src.core.config import ExperimentConfig
 from src.data.data_manager import GraspCache
-from src.data.util import GraspData, NormalizationParams, normalize_translation
+from src.data.util import (
+    CPU_Unpickler,
+    GraspData,
+    NormalizationParams,
+    normalize_translation,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -128,7 +133,7 @@ class GraspDataset(Dataset):
         self.cache._save()  # Write cache once
 
         self.grasp_entries = []
-        
+
         total_grasps = 0
         # self.trans_min = None
         # self.trans_max = None
@@ -152,8 +157,6 @@ class GraspDataset(Dataset):
         self.total_grasps = total_grasps
         if total_grasps == 0:
             logger.warning("No valid grasps found in all files.")
-
-
 
         # if self.trans_min is not None and self.trans_max is not None:
         #     self.norm_params = NormalizationParams(
@@ -212,10 +215,10 @@ class GraspDataset(Dataset):
             normalization_scale=entry.normalization_scale,
             centroid=entry.centroid,
         )
+
     def _load_or_compute_norm_params(
-        self,
-        concurrency_results: List[Tuple[str, ...]]
-        ) -> NormalizationParams:
+        self, concurrency_results: List[Tuple[str, ...]]
+    ) -> NormalizationParams:
         """
         If `config.data.translation_norm_param_path` is provided, load that file.
         Otherwise, compute min/max from `concurrency_results`.
@@ -223,8 +226,12 @@ class GraspDataset(Dataset):
         # 1. If path provided => load directly
         if self.config.data.translation_norm_param_path is not None:
             with open(self.config.data.translation_norm_param_path, "rb") as f:
-                norm_params = pickle.load(f)
-            logger.info(f"Loaded normalization parameters from {self.config.data.translation_norm_param_path}")
+                # norm_params = pickle.load(f, map_location=self.device)
+                norm_params = CPU_Unpickler(f).load()
+
+            logger.info(
+                f"Loaded normalization parameters from {self.config.data.translation_norm_param_path}"
+            )
             return norm_params
 
         # 2. Otherwise => compute min/max from concurrency_results
@@ -242,7 +249,9 @@ class GraspDataset(Dataset):
 
         if trans_min is None or trans_max is None:
             # Fallback if no valid grasps
-            logger.warning("No valid grasps found for computing normalization. Using defaults.")
+            logger.warning(
+                "No valid grasps found for computing normalization. Using defaults."
+            )
             return NormalizationParams(
                 min=torch.zeros(3),
                 max=torch.ones(3),
@@ -253,8 +262,6 @@ class GraspDataset(Dataset):
             min=torch.tensor(trans_min, dtype=torch.float32),
             max=torch.tensor(trans_max, dtype=torch.float32),
         )
-        
-
 
 
 class DataModule(LightningDataModule):
@@ -302,13 +309,12 @@ class DataModule(LightningDataModule):
             used_grasps_file_path = os.path.join(dirpath, "used_grasp_files.json")
             with open(used_grasps_file_path, "w") as file:
                 json.dump(self.full_dataset.grasp_files, file, indent=4)
-            
+
             used_norm_params_file_path = os.path.join(dirpath, "used_norm_params.pkl")
             with open(used_norm_params_file_path, "wb") as file:
                 pickle.dump(self.full_dataset.norm_params, file)
-            
 
-            # Calculate split sizes 
+            # Calculate split sizes
             train_size = int(len(self.full_dataset) * self.split_ratio)
             val_size = len(self.full_dataset) - train_size
 
