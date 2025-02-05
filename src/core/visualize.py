@@ -5,6 +5,7 @@ import torch
 import trimesh
 import wandb
 from trimesh.collision import CollisionManager
+from trimesh.ray.ray_triangle import RayMeshIntersector
 
 from src.data.util import enforce_trimesh
 
@@ -83,26 +84,92 @@ def create_grasp_volume(
     return grasp_box
 
 
+def find_contact_points(
+    gripper_transform: np.ndarray,
+    object_mesh: trimesh.Trimesh,
+    gripper_width: float = 0.082,
+    gripper_height: float = 0.11217,
+    base_height: float = 0.066,
+    num_vertical_rays: int = 30,  # Increased from 10
+    num_horizontal_rays: int = 10,  # New parameter for horizontal sampling
+    num_depth_rays: int = 5,  # New parameter for depth sampling
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Find potential contact points between gripper fingers and object with dense sampling.
+
+    Args:
+        gripper_transform: 4x4 transformation matrix for gripper pose
+        object_mesh: Trimesh object of the target object
+        gripper_width: Width between gripper fingers
+        gripper_height: Total height of gripper
+        base_height: Height of gripper base
+        num_vertical_rays: Number of rays to cast along finger height
+        num_horizontal_rays: Number of rays to cast along finger width
+        num_depth_rays: Number of rays to cast along finger depth
+
+    Returns:
+        left_contacts: Array of contact points for left finger
+        right_contacts: Array of contact points for right finger
+    """
+    intersector = RayMeshIntersector(object_mesh)
+
+    # Calculate sampling points
+    heights = np.linspace(base_height, gripper_height, num_vertical_rays)
+    widths = np.linspace(
+        -0.005, 0.005, num_horizontal_rays
+    )  # Sample across finger width
+    depths = np.linspace(-0.005, 0.005, num_depth_rays)  # Sample across finger depth
+
+    half_width = gripper_width / 2
+
+    # Create grid of points
+    heights_grid, widths_grid, depths_grid = np.meshgrid(heights, widths, depths)
+    num_rays = num_vertical_rays * num_horizontal_rays * num_depth_rays
+
+    # Initialize ray origins
+    left_origins = np.zeros((num_rays, 3))
+    right_origins = np.zeros((num_rays, 3))
+
+    # Set ray origins with offset in all dimensions
+    left_origins[:, 0] = (
+        half_width + widths_grid.flatten()
+    )  # X coordinate with width variation
+    left_origins[:, 1] = depths_grid.flatten()  # Y coordinate with depth variation
+    left_origins[:, 2] = heights_grid.flatten()  # Z coordinate with height variation
+
+    right_origins[:, 0] = -half_width + widths_grid.flatten()
+    right_origins[:, 1] = depths_grid.flatten()
+    right_origins[:, 2] = heights_grid.flatten()
+
+    # Ray directions (left finger rays go right, right finger rays go left)
+    left_directions = np.tile([-1, 0, 0], (num_rays, 1))
+    right_directions = np.tile([1, 0, 0], (num_rays, 1))
+
+    # Transform ray origins and directions to world frame
+    left_origins = trimesh.transform_points(left_origins, gripper_transform)
+    right_origins = trimesh.transform_points(right_origins, gripper_transform)
+
+    rotation = gripper_transform[:3, :3]
+    left_directions = np.dot(left_directions, rotation.T)
+    right_directions = np.dot(right_directions, rotation.T)
+
+    # Find intersections
+    left_locations, left_index_ray, left_index_tri = intersector.intersects_location(
+        left_origins, left_directions
+    )
+    right_locations, right_index_ray, right_index_tri = intersector.intersects_location(
+        right_origins, right_directions
+    )
+
+    return left_locations, right_locations
+
+
 def check_collision(
     rotation_matrix: torch.Tensor,
     translation_vector: torch.Tensor,
     object_mesh_path: str,
     mesh_scale: float,
 ) -> Tuple[bool, trimesh.Scene, float, bool]:
-    """Checks for collisions between gripper poses and object using trimesh's CollisionManager.
-
-    Args:
-        rotation_matrix: Single or batch of rotation matrices with shape (3, 3) or (N, 3, 3)
-        translation_vector: Single or batch of translation vectors with shape (3,) or (N, 3)
-        object_mesh_path: Path to object mesh file
-        mesh_scale: Scale factor for object mesh
-
-    Returns:
-        Tuple containing:
-        - bool: True if any gripper has collision
-        - trimesh.Scene: Scene with object and gripper mesh(es)
-        - float: Minimum distance between gripper(s) and object
-    """
+    """Checks for collisions between gripper poses and object using trimesh's CollisionManager."""
     # Load and scale object mesh
     object_mesh = trimesh.load(object_mesh_path)
     if torch.is_tensor(mesh_scale):
@@ -129,6 +196,7 @@ def check_collision(
 
     batch_size = rotation_matrix.shape[0]
     gripper_meshes = []
+    contact_spheres = []
     has_any_collision = False
     min_distance_overall = float("inf")
 
@@ -152,6 +220,35 @@ def check_collision(
         grasp_volume = create_grasp_volume()
         grasp_volume.apply_transform(gripper_transform)
 
+        # Find contact points with increased density
+        left_contacts, right_contacts = find_contact_points(
+            gripper_transform,
+            object_mesh,
+            num_vertical_rays=40,
+            num_horizontal_rays=3,
+            num_depth_rays=3,
+        )
+
+        # Create smaller visual markers for contact points
+        sphere_radius = 0.001  # Reduced sphere size for denser visualization
+
+        for contact in left_contacts:
+            contact_sphere = trimesh.creation.icosphere(radius=sphere_radius)
+            contact_sphere.apply_translation(contact)
+            contact_sphere.visual.face_colors = [255, 0, 0, 255]  # Red for left finger
+            contact_spheres.append(contact_sphere)
+
+        for contact in right_contacts:
+            contact_sphere = trimesh.creation.icosphere(radius=sphere_radius)
+            contact_sphere.apply_translation(contact)
+            contact_sphere.visual.face_colors = [
+                0,
+                0,
+                255,
+                255,
+            ]  # Blue for right finger
+            contact_spheres.append(contact_sphere)
+
         # Create collision managers
         gripper_manager = CollisionManager()
         gripper_manager.add_object("gripper", gripper_mesh)
@@ -159,29 +256,23 @@ def check_collision(
         volume_manager = CollisionManager()
         volume_manager.add_object("grasp_volume", grasp_volume)
 
-        # Check gripper collision
+        # Check collisions and update visualization
         has_collision, _, _ = object_manager.in_collision_other(
             gripper_manager, return_names=True, return_data=True
         )
 
-        # Check if object is between fingers
         is_graspable, _, _ = object_manager.in_collision_other(
             volume_manager, return_names=True, return_data=True
         )
 
-        # Get minimum distance
         min_distance, _, _ = object_manager.min_distance_other(
             gripper_manager, return_names=True, return_data=True
         )
 
-        # Update overall collision status and minimum distance
         has_any_collision = has_any_collision or has_collision
         min_distance_overall = min(min_distance_overall, min_distance)
 
-        # Update visualization color based on both collision and graspability
-        # Red: Collision
-        # Green: Valid grasp (no collision and object is between fingers)
-        # Yellow: No collision but object not between fingers
+        # Update gripper color based on grasp evaluation
         if has_collision:
             color = [255, 0, 0]  # Red
         elif is_graspable:
@@ -195,10 +286,10 @@ def check_collision(
     # Create visualization
     if isinstance(object_mesh, trimesh.Scene):
         scene = object_mesh
-        for gripper_mesh in gripper_meshes:
-            scene.add_geometry(gripper_mesh)
+        for mesh in gripper_meshes + contact_spheres:
+            scene.add_geometry(mesh)
     else:
-        all_meshes = [object_mesh] + gripper_meshes
+        all_meshes = [object_mesh] + gripper_meshes + contact_spheres
         scene = trimesh.Scene(all_meshes)
 
     return has_any_collision, scene, min_distance_overall, is_graspable

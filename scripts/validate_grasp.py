@@ -34,11 +34,11 @@ if __name__ == "__main__":
     )
 
     # move = torch.tensor([0.011, 0, 0.001]) # barely colliding
-    move = torch.tensor([-0.039, 0, 0])  # too far
+    # move = torch.tensor([-0.039, 0, 0])  # too far
     # move = torch.tensor([-0.025, 0, 0])  # graspable but almost too far
     # move = torch.tensor([0.011, 0, 0])  # very close
     # move = torch.tensor([0.0114, 0, 0]) # barely colliding
-    final_translation = final_translation + move
+    # final_translation = final_translation + move
 
     has_collision, scene, min_distance, is_graspable = check_collision(
         grasp_data.rotation,
