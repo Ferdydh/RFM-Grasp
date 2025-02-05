@@ -72,3 +72,8 @@ config = MLPExperimentConfig.default()
 ```
 
 For more detailed configuration options and parameters, refer to the docstrings in `src/core/config.py`.
+
+#####
+
+uv pip install python-fcl  
+uv pip install "numpy<2.0.0" --force-reinstall

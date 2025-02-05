@@ -33,9 +33,9 @@ if __name__ == "__main__":
         grasp_data.centroid, device=denormalized_translation.device
     )
 
-    move = torch.tensor([0.011, 0.5, 0])
-    # move = torch.tensor([0.014, 0, 0])
-    # move = torch.tensor([0.0113, 0, 0])
+    move = torch.tensor([0.011, 0, 0.001])
+    # move = torch.tensor([0.011, 0, 0]) # very close
+    # move = torch.tensor([0.0114, 0, 0]) # barely colliding
     final_translation = final_translation + move
 
     has_collision, scene, min_distance = check_collision(
