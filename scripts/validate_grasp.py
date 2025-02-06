@@ -1,6 +1,7 @@
 import torch
 
 from src.data.util import denormalize_translation
+from src.models.util import get_grasp_from_batch
 
 if __name__ == "__main__":
     from scripts import initialize
@@ -9,11 +10,12 @@ if __name__ == "__main__":
 
     from src.core.config import ExperimentConfig
     from src.core.visualize import check_collision
-    from src.data.dataset import GraspDataset
+    from src.data.dataset import DataLoader, GraspDataset
     from src.data.util import GraspData
 
     config = ExperimentConfig.default_mlp()
     config.data.translation_norm_param_path = "logs/checkpoints/used_norm_params.pkl"
+    config.data.sample_limit = 100
 
     test = GraspDataset(
         data_root=config.data.data_path,
@@ -23,11 +25,16 @@ if __name__ == "__main__":
         split="test",
     )
 
-    grasp_data: GraspData = test[0]
+    batch_size = 32
+    dataloader = DataLoader(test, batch_size=batch_size, shuffle=True)
+
+    # grasp_data: GraspData = test[0]
+    batch = next(iter(dataloader))
+    grasp_data = get_grasp_from_batch(batch)
 
     # Denormalize and adjust translation with centroid
     denormalized_translation = denormalize_translation(
-        grasp_data.translation, test.norm_params
+        batch.translation, test.norm_params
     )
     final_translation = denormalized_translation + torch.tensor(
         grasp_data.centroid, device=denormalized_translation.device
@@ -41,7 +48,7 @@ if __name__ == "__main__":
     # final_translation = final_translation + move
 
     has_collision, scene, min_distance, is_graspable = check_collision(
-        grasp_data.rotation,
+        batch.rotation,
         final_translation,
         grasp_data.mesh_path,
         grasp_data.dataset_mesh_scale,

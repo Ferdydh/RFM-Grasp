@@ -1,3 +1,5 @@
+import colorsys
+import random
 from typing import List, Tuple, Union
 
 import numpy as np
@@ -8,6 +10,14 @@ from trimesh.collision import CollisionManager
 from trimesh.ray.ray_triangle import RayMeshIntersector
 
 from src.data.util import enforce_trimesh
+
+
+def random_blue():
+    # Generate completely random RGB values
+    red = random.randint(0, 255)
+    green = random.randint(0, 255)
+    blue = random.randint(0, 255)
+    return [red, green, blue, 255]
 
 
 def create_parallel_gripper_mesh(
@@ -93,7 +103,7 @@ def find_contact_points(
     num_vertical_rays: int = 30,  # Increased from 10
     num_horizontal_rays: int = 10,  # New parameter for horizontal sampling
     num_depth_rays: int = 5,  # New parameter for depth sampling
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """Find potential contact points between gripper fingers and object with dense sampling.
 
     Args:
@@ -107,8 +117,7 @@ def find_contact_points(
         num_depth_rays: Number of rays to cast along finger depth
 
     Returns:
-        left_contacts: Array of contact points for left finger
-        right_contacts: Array of contact points for right finger
+        contacts: Array of contact points from left finger
     """
     intersector = RayMeshIntersector(object_mesh)
 
@@ -136,31 +145,31 @@ def find_contact_points(
     left_origins[:, 1] = depths_grid.flatten()  # Y coordinate with depth variation
     left_origins[:, 2] = heights_grid.flatten()  # Z coordinate with height variation
 
-    right_origins[:, 0] = -half_width + widths_grid.flatten()
-    right_origins[:, 1] = depths_grid.flatten()
-    right_origins[:, 2] = heights_grid.flatten()
+    # right_origins[:, 0] = -half_width + widths_grid.flatten()
+    # right_origins[:, 1] = depths_grid.flatten()
+    # right_origins[:, 2] = heights_grid.flatten()
 
     # Ray directions (left finger rays go right, right finger rays go left)
     left_directions = np.tile([-1, 0, 0], (num_rays, 1))
-    right_directions = np.tile([1, 0, 0], (num_rays, 1))
+    # right_directions = np.tile([1, 0, 0], (num_rays, 1))
 
     # Transform ray origins and directions to world frame
     left_origins = trimesh.transform_points(left_origins, gripper_transform)
-    right_origins = trimesh.transform_points(right_origins, gripper_transform)
+    # right_origins = trimesh.transform_points(right_origins, gripper_transform)
 
     rotation = gripper_transform[:3, :3]
     left_directions = np.dot(left_directions, rotation.T)
-    right_directions = np.dot(right_directions, rotation.T)
+    # right_directions = np.dot(right_directions, rotation.T)
 
     # Find intersections
     left_locations, left_index_ray, left_index_tri = intersector.intersects_location(
         left_origins, left_directions
     )
-    right_locations, right_index_ray, right_index_tri = intersector.intersects_location(
-        right_origins, right_directions
-    )
+    # right_locations, right_index_ray, right_index_tri = intersector.intersects_location(
+    #     right_origins, right_directions
+    # )
 
-    return left_locations, right_locations
+    return left_locations
 
 
 def check_collision(
@@ -221,32 +230,23 @@ def check_collision(
         grasp_volume.apply_transform(gripper_transform)
 
         # Find contact points with increased density
-        left_contacts, right_contacts = find_contact_points(
+        left_contacts = find_contact_points(
             gripper_transform,
             object_mesh,
-            num_vertical_rays=40,
-            num_horizontal_rays=3,
-            num_depth_rays=3,
+            num_vertical_rays=10,
+            num_horizontal_rays=1,
+            num_depth_rays=1,
         )
 
         # Create smaller visual markers for contact points
         sphere_radius = 0.001  # Reduced sphere size for denser visualization
 
+        color = random_blue()
+
         for contact in left_contacts:
             contact_sphere = trimesh.creation.icosphere(radius=sphere_radius)
             contact_sphere.apply_translation(contact)
-            contact_sphere.visual.face_colors = [255, 0, 0, 255]  # Red for left finger
-            contact_spheres.append(contact_sphere)
-
-        for contact in right_contacts:
-            contact_sphere = trimesh.creation.icosphere(radius=sphere_radius)
-            contact_sphere.apply_translation(contact)
-            contact_sphere.visual.face_colors = [
-                0,
-                0,
-                255,
-                255,
-            ]  # Blue for right finger
+            contact_sphere.visual.face_colors = color
             contact_spheres.append(contact_sphere)
 
         # Create collision managers
