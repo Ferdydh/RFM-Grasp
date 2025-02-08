@@ -48,6 +48,31 @@ class MeshBatchSampler(Sampler):
         return len(self.mesh_paths)
 
 
+class SingleSDFSampler(Sampler):
+    """
+    Yields one batch of indices per SDF. Each batch = [start_idx, ..., end_idx-1].
+    So inside predict_step(), you see *all* grasps for that single SDF.
+    """
+
+    def __init__(self, dataset, shuffle: bool = False):
+        self.dataset = dataset
+        self.shuffle = shuffle
+
+        # Build a list of all SDF index ranges
+        self.batches = []
+        for _, start_idx, end_idx in dataset.grasp_entries:
+            indices = list(range(start_idx, end_idx))
+            self.batches.append(indices)
+
+    def __iter__(self):
+        for batch_indices in self.batches:
+            print(len(batch_indices))
+            yield batch_indices
+
+    def __len__(self):
+        return len(self.batches)
+
+
 class GraspDataset(Dataset):
     def __init__(
         self,
@@ -366,6 +391,24 @@ class DataModule(LightningDataModule):
         return DataLoader(
             dataset=data,
             batch_sampler=MeshBatchSampler(data),
+            shuffle=False,
+            persistent_workers=True,
+            num_workers=15,
+            generator=torch.Generator(device=self.device),
+        )
+
+    def predict_dataloader(self):
+        # dataset = self.predict_dataset()  # custom helper to get the dataset
+        data = GraspDataset(
+            self.data_root,
+            self.grasp_files,
+            self.config,
+            num_samples=self.num_samples,
+            device=self.device,
+        )
+        return DataLoader(
+            dataset=data,
+            batch_sampler=SingleSDFSampler(data),
             shuffle=False,
             persistent_workers=True,
             num_workers=15,

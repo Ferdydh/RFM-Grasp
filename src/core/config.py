@@ -115,6 +115,8 @@ class TrainingConfig:
     val_every_n_epoch: int = 1
     num_samples_to_log: int = 20
     sample_interval: int = 100
+    test_wasserstein: bool = False
+    test_sample_success: bool = False
 
     # Checkpointing
     checkpoint_dir: str = "logs/checkpoints"

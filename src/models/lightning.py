@@ -362,3 +362,49 @@ class Lightning(pl.LightningModule):
             else test_dataset
         )
         self.translation_norm_params = base.norm_params
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        # 'batch' should contain all grasps from one SDF, thanks to SingleSDFSampler.
+        # Extract the actual data fields from your collated batch:
+        print("batch_idx", batch_idx)
+        grasp_data = get_grasp_from_batch(batch)
+
+        # Here, `grasp_data.rotation` is all real rotations for that SDF,
+        # `grasp_data.translation` is all real translations, etc.
+        real_rotations = grasp_data.rotation
+        print(real_rotations.shape)
+        real_translations = grasp_data.translation
+        real_sdf = grasp_data.sdf
+        sdf_path = grasp_data.mesh_path  # Usually all are the same in one batch
+        sdf_input = rearrange(real_sdf, "... -> 1 1 ...")
+        print(sdf_input.shape, "sdf_input_size")
+        # Generate synthetic grasps
+        # (Example: sample 2000 predictions)
+        so3_samples, r3_samples = sample(
+            self.model,
+            sdf_input,  # shape [1, ...]
+            device=real_rotations.device,
+            normalization_scale=torch.tensor(grasp_data.normalization_scale),
+            num_samples=2,
+            sdf_path=sdf_path,
+        )
+
+        # Compare distributions:
+        from src.models.wasserstein import wasserstein_distance
+
+        wdist_so3 = wasserstein_distance(so3_samples, real_rotations, space="so3")
+        wdist_r3 = wasserstein_distance(r3_samples, real_translations, space="r3")
+
+        self.log_dict(
+            {
+                "wdist_so3": wdist_so3,
+                "wdist_r3": wdist_r3,
+                "sdf_path": sdf_path,
+            }
+        )
+
+        return {
+            "sdf_path": sdf_path,
+            "wdist_so3": wdist_so3,
+            "wdist_r3": wdist_r3,
+        }
