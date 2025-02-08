@@ -177,8 +177,16 @@ def check_collision(
     translation_vector: torch.Tensor,
     object_mesh_path: str,
     mesh_scale: float,
-) -> Tuple[bool, trimesh.Scene, float, bool]:
-    """Checks for collisions between gripper poses and object using trimesh's CollisionManager."""
+) -> Tuple[List[bool], trimesh.Scene, List[float], List[bool]]:
+    """Checks for collisions between gripper poses and object using trimesh's CollisionManager.
+
+    Returns:
+        Tuple containing:
+        - List of collision flags for each grasp
+        - Visualization scene
+        - List of minimum distances for each grasp
+        - List of graspability flags for each grasp
+    """
     # Load and scale object mesh
     object_mesh = trimesh.load(object_mesh_path)
     if torch.is_tensor(mesh_scale):
@@ -206,8 +214,9 @@ def check_collision(
     batch_size = rotation_matrix.shape[0]
     gripper_meshes = []
     contact_spheres = []
-    has_any_collision = False
-    min_distance_overall = float("inf")
+    collision_list = []
+    min_distance_list = []
+    graspable_list = []
 
     # Create collision manager for the object
     object_manager = CollisionManager()
@@ -240,7 +249,6 @@ def check_collision(
 
         # Create smaller visual markers for contact points
         sphere_radius = 0.001  # Reduced sphere size for denser visualization
-
         color = random_blue()
 
         for contact in left_contacts:
@@ -269,8 +277,10 @@ def check_collision(
             gripper_manager, return_names=True, return_data=True
         )
 
-        has_any_collision = has_any_collision or has_collision
-        min_distance_overall = min(min_distance_overall, min_distance)
+        # Store results for this grasp
+        collision_list.append(has_collision)
+        min_distance_list.append(min_distance)
+        graspable_list.append(is_graspable)
 
         # Update gripper color based on grasp evaluation
         if has_collision:
@@ -292,7 +302,7 @@ def check_collision(
         all_meshes = [object_mesh] + gripper_meshes + contact_spheres
         scene = trimesh.Scene(all_meshes)
 
-    return has_any_collision, scene, min_distance_overall, is_graspable
+    return collision_list, scene, min_distance_list, graspable_list
 
 
 def scene_to_wandb_3d(scene: trimesh.Scene) -> wandb.Object3D:

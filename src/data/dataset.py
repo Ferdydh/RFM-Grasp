@@ -24,6 +24,8 @@ from src.data.util import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from tqdm import tqdm
+
 
 # Used so we can get only unique meshes.
 # So, each batch is just one sample with unique mesh.
@@ -31,7 +33,8 @@ class MeshBatchSampler(Sampler):
     def __init__(self, dataset):
         self.mesh_paths = []
         seen = set()
-        for idx in range(len(dataset)):
+        print(len(dataset))
+        for idx in tqdm(range(len(dataset))):
             mesh_path = dataset[idx].mesh_path
             if mesh_path not in seen:
                 self.mesh_paths.append(idx)
