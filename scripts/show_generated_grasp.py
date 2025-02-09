@@ -1,7 +1,10 @@
 import glob
+import json
+import os
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Tuple
 
 import torch
 
@@ -18,7 +21,7 @@ class GraspResult:
     mesh_path: Path
     rotations: torch.Tensor  # SO(3) rotations matrix
     translations: torch.Tensor  # R3 translation vector
-    norm_scale: float
+    mesh_scale: float
 
 
 def find_mesh_path(object_id: str, meshes_dir: Path) -> Path:
@@ -41,7 +44,7 @@ def load_grasp_results(grasp_dir: str, meshes_dir: str) -> list[GraspResult]:
     # Process pickle files
     for pkl_path in grasp_path.glob("*.pkl"):
         # Parse filename: "object_id_scale_number.pkl"
-        object_id, norm_scale = pkl_path.stem.split("_scale_")
+        object_id, mesh_scale = pkl_path.stem.split("_scale_")
 
         if object_id not in mesh_cache:
             print(f"Skipping {pkl_path}: No mesh found for {object_id}")
@@ -54,7 +57,7 @@ def load_grasp_results(grasp_dir: str, meshes_dir: str) -> list[GraspResult]:
                     mesh_path=mesh_cache[object_id],
                     rotations=data["so3_output"],
                     translations=data["r3_output"],
-                    norm_scale=float(norm_scale),
+                    mesh_scale=float(mesh_scale),
                 )
             )
 
@@ -63,11 +66,17 @@ def load_grasp_results(grasp_dir: str, meshes_dir: str) -> list[GraspResult]:
 
 def match_grasp_cache(
     result: GraspResult, cache: dict[str, GraspCacheEntry]
-) -> GraspCacheEntry | None:
-    """Find matching cache entry based on mesh name and normalization scale."""
-    TOLERANCE = 1e-2
+) -> Tuple[str, GraspCacheEntry]:
+    """Find matching cache entry based on mesh name and normalization scale.
+
+    Raises:
+        ValueError: If multiple matching cache entries are found or if invalid cache filename
+    """
+    TOLERANCE = 1e-9
     item_name = result.mesh_path.parent.name
     item_id = result.mesh_path.stem
+
+    matches: list[Tuple[str, GraspCacheEntry]] = []
 
     for filename, entry in cache.items():
         if not filename.endswith(".h5"):
@@ -76,16 +85,31 @@ def match_grasp_cache(
         # Parse cache filename: "item_name_item_id_norm_params.h5"
         parts = filename[:-3].split("_")  # Remove .h5 and split
         cache_id = parts[-2]
+        cache_mesh_scale = float(parts[-1])
         cache_name = "_".join(parts[:-2])  # Handle names with underscores
 
         if item_name == cache_name and item_id == cache_id:
-            print("result.norm_scale", result.norm_scale)
-            print("cache_norm", entry.normalization_scale)
+            # print(f"Found matching cache entry: {filename}")
+            # print("Result mesh scale:", result.mesh_scale)
+            # print("Cache mesh scale:", cache_mesh_scale)
 
-            if abs(result.norm_scale - entry.normalization_scale) <= TOLERANCE:
-                return entry
+            if abs(result.mesh_scale - cache_mesh_scale) < TOLERANCE:
+                # if str(entry.normalization_scale).startswith(f"{result.norm_scale:.3f}"):
+                matches.append((filename, entry))
 
-    return None
+    if not matches:
+        raise ValueError(f"No matching cache entry found for {item_name} {item_id}")
+
+    # print(result.norm_scale)
+    # TODO: this id is donkey. Hardcoding it for now because apparently they have VERY similar mesh_scale
+    # This is the only very similar one
+    if len(matches) > 1 and item_id != "b09e0a52bd3b1b4eab2bd7322386ffd":
+        print([(f, e.dataset_mesh_scale, e.normalization_scale) for f, e in matches])
+        raise ValueError(
+            f"Found multiple matching cache entries: {[m[0] for m in matches]}"
+        )
+
+    return matches[0]
 
 
 if __name__ == "__main__":
@@ -108,6 +132,15 @@ if __name__ == "__main__":
     with open(translation_norm_param_path, "rb") as f:
         norm_params = CPU_Unpickler(f).load()
 
+    with open("logs/checkpoints/run_20250202_233846/used_grasp_files.json", "r") as f:
+        used_files = json.load(f)
+
+    # Get all files in the grasps directory
+    all_files = os.listdir("data/grasps")
+
+    # Find files that are not in the used_files list
+    unused_files = [file for file in all_files if file not in used_files]
+
     # Print some results
     for result in results:
         # print(f"Mesh: {result.mesh_path}")
@@ -116,7 +149,13 @@ if __name__ == "__main__":
         # print("---")
 
         # ========================================
-        match = match_grasp_cache(result, cache)
+        filename, match = match_grasp_cache(result, cache)
+
+        continue
+
+        if match.mesh_path not in unused_files:
+            # print(f"This file was used in training: {match.mesh_path}")
+            continue
 
         translation = result.translations
         rotation = result.rotations
