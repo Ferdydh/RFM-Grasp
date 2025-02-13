@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Tuple
 
+import pandas as pd
 import torch
 
 from core.visualize import check_collision
@@ -121,12 +122,6 @@ if __name__ == "__main__":
 
     print(f"Loaded {len(cache)} cache entries")
 
-    # # Example: Find cache match for first result
-    # match = match_grasp_cache(results[1], cache)
-    # print(f"Found matching cache entry: {match is not None}")
-
-    # ========================================
-
     translation_norm_param_path = "logs/checkpoints/used_norm_params.pkl"
 
     with open(translation_norm_param_path, "rb") as f:
@@ -138,22 +133,15 @@ if __name__ == "__main__":
     # Get all files in the grasps directory
     all_files = os.listdir("data/grasps")
 
-    # Find files that are not in the used_files list
-    unused_files = [file for file in all_files if file not in used_files]
+    # Initialize lists to store data
+    grasp_data = []
 
-    # Print some results
+    # Process each result
     for result in results:
-        # print(f"Mesh: {result.mesh_path}")
-        # print(f"Rotations shape: {result.rotations.shape}")
-        # print(f"Translations shape: {result.translations.shape}")
-        # print("---")
-
-        # ========================================
         filename, match = match_grasp_cache(result, cache)
 
-        if match.mesh_path not in unused_files:
-            # print(f"This file was used in training: {match.mesh_path}")
-            continue
+        # Get training status
+        is_used_in_training = match.mesh_path in used_files
 
         translation = result.translations
         rotation = result.rotations
@@ -167,9 +155,6 @@ if __name__ == "__main__":
             centroid, device=denormalized_translation.device
         )
 
-        # final_translation = final_translation[-16:]
-        # rotation = rotation[-16:]
-
         has_collision, scene, min_distance, is_graspable = check_collision(
             rotation,
             final_translation,
@@ -177,5 +162,37 @@ if __name__ == "__main__":
             dataset_mesh_scale,
         )
 
-        print(has_collision, min_distance, is_graspable)
-        # scene.show()
+        # Create entry for each grasp
+        for i in range(len(rotation)):
+            grasp_info = {
+                "mesh_path": mesh_path,
+                "is_used_in_training": is_used_in_training,
+                "dataset_mesh_scale": dataset_mesh_scale,
+                "normalization_scale": match.normalization_scale,
+                "has_collision": bool(has_collision[i]),
+                "min_distance": float(min_distance[i]),
+                "is_graspable": bool(is_graspable[i]),
+                "grasp_translation": final_translation[i].tolist(),
+                "grasp_rotation": rotation[i].tolist(),
+                "centroid": centroid,
+            }
+            grasp_data.append(grasp_info)
+
+        print(f"Processed {mesh_path}: {len(rotation)} grasps")
+
+    # Create DataFrame
+    df = pd.DataFrame(grasp_data)
+
+    # Save to CSV
+    output_path = "grasp_analysis_results.csv"
+    df.to_csv(output_path, index=False)
+    print(f"\nSaved analysis results to {output_path}")
+
+    # Print summary statistics
+    print("\nSummary Statistics:")
+    print(f"Total grasps analyzed: {len(df)}")
+    print(f"Unique meshes: {df['mesh_path'].nunique()}")
+    print(
+        f"Successful grasps: {df['is_graspable'].sum()} ({(df['is_graspable'].mean() * 100):.2f}%)"
+    )
+    print(f"Average minimum distance: {df['min_distance'].mean():.4f}")
