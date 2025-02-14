@@ -151,9 +151,9 @@ if __name__ == "__main__":
         # ========================================
         filename, match = match_grasp_cache(result, cache)
 
-        if match.mesh_path not in unused_files:
-            # print(f"This file was used in training: {match.mesh_path}")
-            continue
+        # if match.mesh_path not in unused_files:
+        # print(f"This file was used in training: {match.mesh_path}")
+        # continue
 
         translation = result.translations
         rotation = result.rotations
@@ -167,8 +167,8 @@ if __name__ == "__main__":
             centroid, device=denormalized_translation.device
         )
 
-        # final_translation = final_translation[-16:]
-        # rotation = rotation[-16:]
+        final_translation = final_translation[-16:]
+        rotation = rotation[-16:]
 
         has_collision, scene, min_distance, is_graspable = check_collision(
             rotation,
@@ -177,5 +177,6 @@ if __name__ == "__main__":
             dataset_mesh_scale,
         )
 
-        print(has_collision, min_distance, is_graspable)
-        # scene.show()
+        # print(has_collision, min_distance, is_graspable)
+        scene.show()
+        break
