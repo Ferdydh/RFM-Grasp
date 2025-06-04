@@ -1,5 +1,10 @@
 # Project Documentation
 
+Riemannian Flow Matching policy for robot grasping. Basically we developed a model to generate SE(3) grasp positions, given object mesh.
+
+
+
+
 ## Project Structure
 
 ```
