@@ -1,6 +1,6 @@
 # Project Documentation
 
-Riemannian Flow Matching policy for robot grasping. Basically we developed a model to generate SE(3) grasp positions, given object mesh.
+Riemannian Flow Matching policy for robot grasping. Basically we developed a model to generate SE(3) grasp positions, given object mesh. The cool thing: the flow matching process is constrained by riemannian manifold.
 
 
 
